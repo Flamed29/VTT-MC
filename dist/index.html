@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VTT TileCraft - RPG Map Studio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script type="module" crossorigin src="/assets/index-BWK2NKOB.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-CCLsSfRk.css">
+</head>
+<body class="dark-theme">
+  <div id="app">
+    <!-- Top Navigation & Actions Bar -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-icon">🗺️</span>
+        <div class="brand-text">
+          <h1>VTT TileCraft</h1>
+          <span class="subtext">RPG Tile-Based Map Studio</span>
+        </div>
+      </div>
+
+      <div class="topbar-controls">
+        <div class="control-group">
+          <label>Mappa:</label>
+          <input type="number" id="input-map-w" min="5" max="200" value="30" title="Larghezza in celle" />
+          <span>×</span>
+          <input type="number" id="input-map-h" min="5" max="200" value="25" title="Altezza in celle" />
+          <button id="btn-resize-map" class="btn btn-secondary btn-sm" title="Ridimensiona Mappa">Applica</button>
+        </div>
+
+        <div class="control-group">
+          <label>Cella VTT:</label>
+          <select id="select-grid-px" title="Pixel per casella VTT">
+            <option value="70">70 px (Roll20 / Stand.)</option>
+            <option value="100" selected>100 px (Foundry 100)</option>
+            <option value="140">140 px (Foundry 140 / HQ)</option>
+            <option value="200">200 px (Ultra HQ)</option>
+          </select>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="control-group">
+          <button id="btn-undo" class="btn btn-icon" title="Annulla (Ctrl+Z)">↩</button>
+          <button id="btn-redo" class="btn btn-icon" title="Ripristina (Ctrl+Y)">↪</button>
+          <button id="btn-clear" class="btn btn-icon btn-danger" title="Pulisci Mappa">🗑️</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="export-group">
+          <button id="btn-export-vtt" class="btn btn-primary" title="Esporta file Universal VTT compatibile con Foundry, Roll20, Owlbear">
+            <span class="icon">💾</span> Esporta .dd2vtt
+          </button>
+          <button id="btn-export-png" class="btn btn-secondary" title="Esporta immagine PNG alta risoluzione">
+            <span class="icon">🖼️</span> Esporta PNG
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <div class="workspace">
+      <!-- Left Primary Toolbar -->
+      <aside class="sidebar-tools">
+        <div class="tool-section-title">Strumenti</div>
+        <div class="tool-buttons">
+          <button class="tool-btn" data-tool="pan" title="Pan / Naviga mappa (Tasto Spazio o Click Centrale)">
+            <span class="tool-icon">🖐️</span>
+            <span class="tool-label">Sposta</span>
+          </button>
+          <button class="tool-btn active" data-tool="terrain" title="Pennello Terreno">
+            <span class="tool-icon">🧱</span>
+            <span class="tool-label">Terreno</span>
+          </button>
+          <button class="tool-btn" data-tool="liquid" title="Liquidi (Acqua, Lava, Acido, Sangue)">
+            <span class="tool-icon">🌊</span>
+            <span class="tool-label">Liquidi</span>
+          </button>
+          <button class="tool-btn" data-tool="prop" title="Oggetti & Props (Tavoli, Casse, Barili, Arredi)">
+            <span class="tool-icon">📦</span>
+            <span class="tool-label">Oggetti</span>
+          </button>
+          <button class="tool-btn" data-tool="wall" title="Muri VTT (Line of Sight)">
+            <span class="tool-icon">🛡️</span>
+            <span class="tool-label">Muri</span>
+          </button>
+          <button class="tool-btn" data-tool="door" title="Porte VTT (Aperte, Chiuse, Segrete)">
+            <span class="tool-icon">🚪</span>
+            <span class="tool-label">Porte</span>
+          </button>
+          <button class="tool-btn" data-tool="light" title="Sorgenti di Luce Dinamiche">
+            <span class="tool-icon">🔥</span>
+            <span class="tool-label">Luci</span>
+          </button>
+          <div class="tool-btn-wrapper">
+            <button class="tool-btn" data-tool="erase" title="Gomma (Cancella elementi)">
+              <span class="tool-icon">🧹</span>
+              <span class="tool-label">Gomma</span>
+            </button>
+            <button class="tool-btn-settings" id="btn-eraser-settings" title="Filtri e proprietà della gomma (Includi/Escludi elementi)">⚙️</button>
+          </div>
+        </div>
+
+        <!-- Popover rapido impostazioni gomma -->
+        <div class="eraser-popover" id="eraser-popover" style="display: none;">
+          <div class="popover-header">
+            <span>Filtri Gomma</span>
+            <button id="btn-close-popover" class="btn-xs-close">&times;</button>
+          </div>
+          <div class="popover-checks">
+            <label class="popover-check"><input type="checkbox" id="pop-ef-props" checked /> Oggetti / Props</label>
+            <label class="popover-check"><input type="checkbox" id="pop-ef-lights" checked /> Luci</label>
+            <label class="popover-check"><input type="checkbox" id="pop-ef-liquid" checked /> Liquidi</label>
+            <label class="popover-check"><input type="checkbox" id="pop-ef-walls" checked /> Muri</label>
+            <label class="popover-check"><input type="checkbox" id="pop-ef-doors" checked /> Porte</label>
+            <label class="popover-check"><input type="checkbox" id="pop-ef-terrain" /> Terreno</label>
+          </div>
+        </div>
+
+        <div class="tool-section-title" style="margin-top: 1rem;">Modalità Pennello</div>
+        <div class="brush-modes">
+          <button class="brush-mode-btn active" data-mode="single" title="Punto singolo (1x1)">1x1</button>
+          <button class="brush-mode-btn" data-mode="rect" title="Rettangolo / Riempimento">Rett.</button>
+          <button class="brush-mode-btn" data-mode="fill" title="Secchiello / Flood Fill">Secchio</button>
+        </div>
+
+        <div class="tool-section-title" style="margin-top: 1rem;">Visualizzazione</div>
+        <div class="view-options">
+          <label class="checkbox-label">
+            <input type="checkbox" id="chk-grid" checked /> Mostra Griglia
+          </label>
+          <div class="grid-thickness-control" style="padding-left: 0.2rem; margin: 0.35rem 0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 0.25rem;">
+              <span>Spessore Griglia:</span>
+              <strong id="val-grid-thick" style="color: var(--primary);">1 px</strong>
+            </div>
+            <input type="range" id="slider-grid-thick" min="0.5" max="5" step="0.5" value="1" style="width: 100%; accent-color: var(--primary); cursor: pointer;" />
+          </div>
+          <label class="checkbox-label">
+            <input type="checkbox" id="chk-water-fx" checked /> Onde & Effetti
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="chk-lighting" checked /> Anteprima Luci
+          </label>
+        </div>
+      </aside>
+
+      <!-- Center Canvas Viewport -->
+      <main class="canvas-container" id="canvas-container">
+        <canvas id="viewport-canvas"></canvas>
+        <div class="canvas-overlay-hints" id="overlay-hints">
+          Tasto Sinistro per dipingere/piazzare • Premi [R] per ruotare gli oggetti • Tasto Destro/Centrale per spostarti
+        </div>
+      </main>
+
+      <!-- Right Properties & Palette Panel -->
+      <aside class="sidebar-palette">
+        <!-- Palette Header with Add Asset Button -->
+        <div class="palette-header-row">
+          <div>
+            <h2 id="palette-title">Palette Terreno</h2>
+            <span id="palette-subtitle" class="palette-subtitle">Seleziona texture</span>
+          </div>
+          <button id="btn-open-add-asset" class="btn btn-primary btn-xs" title="Importa o crea un nuovo asset personalizzato">
+            ➕ Aggiungi
+          </button>
+        </div>
+
+        <!-- Category Filter Tabs -->
+        <div class="category-tabs" id="category-tabs">
+          <button class="cat-tab active" data-cat="all">Tutti</button>
+          <button class="cat-tab" data-cat="terrain">Terreni</button>
+          <button class="cat-tab" data-cat="liquid">Liquidi</button>
+          <button class="cat-tab" data-cat="wall">Muri</button>
+          <button class="cat-tab" data-cat="prop">Oggetti</button>
+          <button class="cat-tab" data-cat="door">Porte</button>
+        </div>
+
+        <!-- Search Bar pinned at top of Palette -->
+        <div class="palette-search-container">
+          <input type="text" id="palette-search" placeholder="🔍 Cerca tra i 215 asset..." autocomplete="off" />
+          <button id="btn-clear-search" class="btn-clear-search" style="display: none;">&times;</button>
+        </div>
+
+        <!-- Dynamic Subcategory Pills (Naturali, Neve, Grotte, ecc.) -->
+        <div class="subcategory-pills" id="subcategory-pills"></div>
+
+        <!-- Dynamic Palette Body -->
+        <div class="palette-body" id="palette-body">
+          <!-- Populated dynamically -->
+        </div>
+
+        <!-- Quick Map Presets -->
+        <div class="presets-section">
+          <h3>Esempi & Template Rapidi</h3>
+          <div class="preset-buttons">
+            <button id="preset-dungeon" class="preset-btn">🏰 Dungeon con Canale</button>
+            <button id="preset-tavern" class="preset-btn">🍺 Locanda con Arredi</button>
+            <button id="preset-lava" class="preset-btn">🌋 Fiume di Lava & Altare</button>
+            <button id="preset-cave" class="preset-btn">🦇 Grotta Sotterranea</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- Bottom Status & Telemetry Bar -->
+    <footer class="statusbar">
+      <div class="status-left">
+        <span class="status-badge" id="stat-fps">60 FPS</span>
+        <span class="status-item" id="stat-mem">Memoria: ~24 KB</span>
+        <span class="status-item" id="stat-grid-size">30 × 25 celle</span>
+      </div>
+      <div class="status-right">
+        <span class="status-item" id="stat-cursor-tile">Cella: [0, 0]</span>
+        <span class="status-item" id="stat-zoom">Zoom: 100%</span>
+        <button id="btn-reset-zoom" class="btn btn-xs" title="Ripristina Vista">Reset Vista</button>
+      </div>
+    </footer>
+
+    <!-- Modal: Aggiungi Nuovo Asset -->
+    <div class="modal-backdrop" id="modal-add-asset" style="display: none;">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>➕ Aggiungi Nuovo Asset</h3>
+          <button id="btn-close-modal" class="btn-modal-close">&times;</button>
+        </div>
+
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="asset-category-select">Tipo di Asset (*):</label>
+            <select id="asset-category-select">
+              <option value="prop" selected>Oggetti / Prop (Arredi, Casse, Alberi, Elementi)</option>
+              <option value="terrain">Terreno (Pavimentazioni, Terreni)</option>
+              <option value="liquid">Liquidi (Acqua speciale, Lava, Veleno, ecc.)</option>
+              <option value="door">Porte & Varchi</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="asset-name-input">Nome Asset (*):</label>
+            <input type="text" id="asset-name-input" placeholder="Es. Tavolo Rotondo, Fiume Tossico, Statua..." />
+          </div>
+
+          <!-- File Upload Zone -->
+          <div class="form-group" id="group-file-upload">
+            <label>Immagine Asset (PNG, WebP, SVG, JPG):</label>
+            <div class="drop-zone" id="asset-drop-zone">
+              <div class="drop-zone-prompt">
+                <span class="drop-icon">📁</span>
+                <span>Trascina qui l'immagine o <strong>clicca per sfogliare</strong></span>
+                <span class="drop-hint">PNG trasparenti raccomandati per gli Oggetti</span>
+              </div>
+              <input type="file" id="asset-file-input" accept="image/*" style="display: none;" />
+              <div class="drop-preview" id="asset-preview-container" style="display: none;">
+                <img id="asset-preview-img" alt="Preview" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Extra settings if liquid is selected -->
+          <div id="liquid-custom-settings" style="display: none; border-top: 1px solid var(--border); padding-top: 0.75rem;">
+            <div class="palette-control-row">
+              <label>Colore Profondo:</label>
+              <input type="color" id="liquid-color-deep" value="#0e7490" />
+            </div>
+            <div class="palette-control-row" style="margin-top: 0.5rem;">
+              <label>Colore Superficie:</label>
+              <input type="color" id="liquid-color-shallow" value="#22d3ee" />
+            </div>
+            <div class="palette-control-row" style="margin-top: 0.5rem;">
+              <label>Colore Schiuma/Riva:</label>
+              <input type="color" id="liquid-color-foam" value="#cffafe" />
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button id="btn-cancel-asset" class="btn btn-secondary">Annulla</button>
+          <button id="btn-save-asset" class="btn btn-primary">Salva Asset</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
