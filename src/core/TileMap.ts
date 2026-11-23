@@ -9,18 +9,23 @@ import {
   WALL_BLOCK,
   DoorData,
   LightSource,
-  PlacedProp
+  PlacedProp,
+  TileMapJSON
 } from '../types';
 import { WALL_CATALOG } from '../data/wallCatalog';
+import { FoliageInstance, FoliageLayerJSON } from '../foliage/FoliageModel';
+import { FoliageSpatialIndex } from '../foliage/FoliageSpatialIndex';
 
 interface HistorySnapshot {
   terrain: Uint16Array;
   liquid: Uint8Array;
   walls: Uint8Array;
   wallTypes: Uint8Array;
+  fogOfWar: Uint8Array;
   doors: DoorData[];
   lights: LightSource[];
   props: PlacedProp[];
+  foliage: FoliageInstance[];
 }
 
 export class TileMap {
@@ -34,10 +39,16 @@ export class TileMap {
   public walls: Uint8Array;
   /** Per-cell wall type index into WALL_CATALOG (0-based). 0 = default. */
   public wallTypes: Uint8Array;
+  /** Fog of War layer: 0 = revealed, 1 = hidden / shrouded in darkness */
+  public fogOfWar: Uint8Array;
 
   public doors: Map<string, DoorData> = new Map();
   public lights: LightSource[] = [];
   public props: PlacedProp[] = [];
+  public foliage: FoliageInstance[] = [];
+  public foliageIndex: FoliageSpatialIndex = new FoliageSpatialIndex();
+  public windDirection: [number, number] = [1.0, 0.3];
+  public windStrength = 0.8;
   public activeWallId = 'wall_worked_stone';
 
   // Undo / Redo stacks
@@ -55,6 +66,7 @@ export class TileMap {
     this.liquid = new Uint8Array(size);
     this.walls = new Uint8Array(size);
     this.wallTypes = new Uint8Array(size); // 0 = wall_field_stone (index 0 in WALL_CATALOG)
+    this.fogOfWar = new Uint8Array(size);  // 0 = revealed, 1 = hidden
 
     this.initDefaultGround();
   }
@@ -169,6 +181,27 @@ export class TileMap {
     }
   }
 
+  // --- Fog of War Accessors ---
+  public getFog(x: number, y: number): boolean {
+    if (!this.isInBounds(x, y)) return false;
+    return this.fogOfWar[this.getIndex(x, y)] === 1;
+  }
+
+  public setFog(x: number, y: number, hidden: boolean): void {
+    if (!this.isInBounds(x, y)) return;
+    this.fogOfWar[this.getIndex(x, y)] = hidden ? 1 : 0;
+  }
+
+  public toggleFog(x: number, y: number): void {
+    if (!this.isInBounds(x, y)) return;
+    const idx = this.getIndex(x, y);
+    this.fogOfWar[idx] = this.fogOfWar[idx] === 1 ? 0 : 1;
+  }
+
+  public fillFog(hidden: boolean): void {
+    this.fogOfWar.fill(hidden ? 1 : 0);
+  }
+
   // --- Doors ---
   public getDoorKey(x: number, y: number, edge: 'N' | 'E' | 'S' | 'W'): string {
     return `${x},${y},${edge}`;
@@ -227,6 +260,38 @@ export class TileMap {
       }
     }
     return null;
+  }
+
+  // --- Foliage / Erba Overlay ---
+  public addFoliage(item: FoliageInstance): void {
+    this.foliage.push(item);
+    this.foliageIndex.insert(item);
+  }
+
+  public removeFoliageInRadius(worldGridX: number, worldGridY: number, radiusGrid: number): number {
+    const removed = this.foliageIndex.removeInRadius(worldGridX, worldGridY, radiusGrid);
+    if (removed.length > 0) {
+      const removedIds = new Set(removed.map(r => r.id));
+      this.foliage = this.foliage.filter(f => !removedIds.has(f.id));
+    }
+    return removed.length;
+  }
+
+  public exportFoliageJSON(): FoliageLayerJSON {
+    return {
+      version: 1,
+      instances: this.foliage.map(f => ({ ...f })),
+      windDirection: [...this.windDirection],
+      windStrength: this.windStrength
+    };
+  }
+
+  public importFoliageJSON(data: FoliageLayerJSON): void {
+    this.saveState();
+    this.foliage = data.instances.map(f => ({ ...f }));
+    this.windDirection = [...data.windDirection];
+    this.windStrength = data.windStrength;
+    this.foliageIndex.load(this.foliage);
   }
 
   // --- Lights ---
@@ -314,6 +379,7 @@ export class TileMap {
     const newLiquid = new Uint8Array(newW * newH);
     const newWalls = new Uint8Array(newW * newH);
     const newWallTypes = new Uint8Array(newW * newH);
+    const newFogOfWar = new Uint8Array(newW * newH);
 
     newTerrain.fill(TileType.STONE_FLOOR);
 
@@ -328,6 +394,7 @@ export class TileMap {
         newLiquid[newIdx] = this.liquid[oldIdx];
         newWalls[newIdx] = this.walls[oldIdx];
         newWallTypes[newIdx] = this.wallTypes[oldIdx];
+        newFogOfWar[newIdx] = this.fogOfWar[oldIdx];
       }
     }
 
@@ -337,6 +404,7 @@ export class TileMap {
     this.liquid = newLiquid;
     this.walls = newWalls;
     this.wallTypes = newWallTypes;
+    this.fogOfWar = newFogOfWar;
 
     // Prune out-of-bounds doors, lights, props
     for (const [key, door] of Array.from(this.doors.entries())) {
@@ -346,6 +414,7 @@ export class TileMap {
     }
     this.lights = this.lights.filter(l => l.x < newW && l.y < newH);
     this.props = this.props.filter(p => p.x < newW && p.y < newH);
+    this.foliage = this.foliage.filter(f => f.x < newW && f.y < newH);
   }
 
   // --- Memory Footprint Calculation ---
@@ -353,10 +422,12 @@ export class TileMap {
     const terrainBytes = this.terrain.byteLength;
     const liquidBytes = this.liquid.byteLength;
     const wallsBytes = this.walls.byteLength;
+    const fogBytes = this.fogOfWar.byteLength;
     const doorsEstimate = this.doors.size * 64;
     const lightsEstimate = this.lights.length * 64;
     const propsEstimate = this.props.length * 64;
-    return terrainBytes + liquidBytes + wallsBytes + doorsEstimate + lightsEstimate + propsEstimate;
+    const foliageEstimate = this.foliage.length * 48;
+    return terrainBytes + liquidBytes + wallsBytes + fogBytes + doorsEstimate + lightsEstimate + propsEstimate + foliageEstimate;
   }
 
   public getFormattedMemoryUsage(): string {
@@ -376,9 +447,11 @@ export class TileMap {
       liquid: new Uint8Array(this.liquid),
       walls: new Uint8Array(this.walls),
       wallTypes: new Uint8Array(this.wallTypes),
+      fogOfWar: new Uint8Array(this.fogOfWar),
       doors: Array.from(this.doors.values()).map(d => ({ ...d })),
       lights: this.lights.map(l => ({ ...l })),
-      props: this.props.map(p => ({ ...p }))
+      props: this.props.map(p => ({ ...p })),
+      foliage: this.foliage.map(f => ({ ...f }))
     });
     this.redoStack = [];
   }
@@ -390,9 +463,11 @@ export class TileMap {
       liquid: new Uint8Array(this.liquid),
       walls: new Uint8Array(this.walls),
       wallTypes: new Uint8Array(this.wallTypes),
+      fogOfWar: new Uint8Array(this.fogOfWar),
       doors: Array.from(this.doors.values()).map(d => ({ ...d })),
       lights: this.lights.map(l => ({ ...l })),
-      props: this.props.map(p => ({ ...p }))
+      props: this.props.map(p => ({ ...p })),
+      foliage: this.foliage.map(f => ({ ...f }))
     };
     this.redoStack.push(current);
 
@@ -401,12 +476,15 @@ export class TileMap {
     this.liquid.set(prev.liquid);
     this.walls.set(prev.walls);
     this.wallTypes.set(prev.wallTypes);
+    this.fogOfWar.set(prev.fogOfWar);
     this.doors.clear();
     for (const d of prev.doors) {
       this.doors.set(this.getDoorKey(d.x, d.y, d.edge), d);
     }
     this.lights = prev.lights;
     this.props = prev.props;
+    this.foliage = prev.foliage;
+    this.foliageIndex.load(this.foliage);
     return true;
   }
 
@@ -417,9 +495,11 @@ export class TileMap {
       liquid: new Uint8Array(this.liquid),
       walls: new Uint8Array(this.walls),
       wallTypes: new Uint8Array(this.wallTypes),
+      fogOfWar: new Uint8Array(this.fogOfWar),
       doors: Array.from(this.doors.values()).map(d => ({ ...d })),
       lights: this.lights.map(l => ({ ...l })),
-      props: this.props.map(p => ({ ...p }))
+      props: this.props.map(p => ({ ...p })),
+      foliage: this.foliage.map(f => ({ ...f }))
     };
     this.undoStack.push(current);
 
@@ -428,12 +508,15 @@ export class TileMap {
     this.liquid.set(next.liquid);
     this.walls.set(next.walls);
     this.wallTypes.set(next.wallTypes);
+    this.fogOfWar.set(next.fogOfWar);
     this.doors.clear();
     for (const d of next.doors) {
       this.doors.set(this.getDoorKey(d.x, d.y, d.edge), d);
     }
     this.lights = next.lights;
     this.props = next.props;
+    this.foliage = next.foliage;
+    this.foliageIndex.load(this.foliage);
     return true;
   }
 
@@ -443,8 +526,87 @@ export class TileMap {
     this.liquid.fill(LiquidType.NONE);
     this.walls.fill(WALL_NONE);
     this.wallTypes.fill(0);
+    this.fogOfWar.fill(0);
     this.doors.clear();
     this.lights = [];
     this.props = [];
+    this.foliage = [];
+    this.foliageIndex.clear();
+  }
+
+  // --- Map Library Serialization ---
+  public exportJSON(name = 'Mappa Senza Nome'): TileMapJSON {
+    return {
+      version: 1,
+      name,
+      width: this.width,
+      height: this.height,
+      pixelsPerGrid: this.pixelsPerGrid,
+      terrain: Array.from(this.terrain),
+      liquid: Array.from(this.liquid),
+      walls: Array.from(this.walls),
+      wallTypes: Array.from(this.wallTypes),
+      fogOfWar: Array.from(this.fogOfWar),
+      doors: Array.from(this.doors.values()),
+      lights: this.lights.map(l => ({ ...l })),
+      props: this.props.map(p => ({ ...p })),
+      foliage: this.foliage.map(f => ({ ...f })),
+      windDirection: [...this.windDirection],
+      windStrength: this.windStrength
+    };
+  }
+
+  public loadFromJSON(json: TileMapJSON): void {
+    this.saveState();
+    this.width = json.width || 30;
+    this.height = json.height || 25;
+    this.pixelsPerGrid = json.pixelsPerGrid || 100;
+    const size = this.width * this.height;
+
+    this.terrain = new Uint16Array(size);
+    if (json.terrain && json.terrain.length === size) {
+      this.terrain.set(json.terrain);
+    } else {
+      this.terrain.fill(TileType.STONE_FLOOR);
+    }
+
+    this.liquid = new Uint8Array(size);
+    if (json.liquid && json.liquid.length === size) {
+      this.liquid.set(json.liquid);
+    }
+
+    this.walls = new Uint8Array(size);
+    if (json.walls && json.walls.length === size) {
+      this.walls.set(json.walls);
+    }
+
+    this.wallTypes = new Uint8Array(size);
+    if (json.wallTypes && json.wallTypes.length === size) {
+      this.wallTypes.set(json.wallTypes);
+    }
+
+    this.fogOfWar = new Uint8Array(size);
+    if (json.fogOfWar && json.fogOfWar.length === size) {
+      this.fogOfWar.set(json.fogOfWar);
+    }
+
+    this.doors.clear();
+    if (Array.isArray(json.doors)) {
+      for (const d of json.doors) {
+        this.doors.set(this.getDoorKey(d.x, d.y, d.edge), d);
+      }
+    }
+
+    this.lights = Array.isArray(json.lights) ? json.lights.map(l => ({ ...l })) : [];
+    this.props = Array.isArray(json.props) ? json.props.map(p => ({ ...p })) : [];
+    this.foliage = Array.isArray(json.foliage) ? json.foliage.map(f => ({ ...f })) : [];
+    this.foliageIndex.load(this.foliage);
+
+    if (Array.isArray(json.windDirection) && json.windDirection.length === 2) {
+      this.windDirection = [json.windDirection[0], json.windDirection[1]];
+    }
+    if (typeof json.windStrength === 'number') {
+      this.windStrength = json.windStrength;
+    }
   }
 }

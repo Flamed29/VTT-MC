@@ -15,8 +15,15 @@ import {
   ToolType,
   BrushMode,
   AssetCategory,
-  AssetDefinition
+  AssetDefinition,
+  FoliageType,
+  SavedMapEntry,
+  TileMapJSON
 } from './types';
+
+import { FoliageBrush } from './foliage/FoliageBrush';
+import { FOLIAGE_VARIANTS, FoliageModel } from './foliage/FoliageModel';
+import { MapStorage } from './core/MapStorage';
 
 class EditorApp {
   public tileMap: TileMap;
@@ -29,6 +36,14 @@ class EditorApp {
   public activeSubcat = 'all';
   public searchQuery = '';
 
+  // Map Library & Saved Map state
+  public currentMapName = 'Dungeon Iniziale';
+  public currentMapId: string | null = null;
+
+  // Fog of War (Nebbia di Guerra) state
+  public showFog = true;
+  public fogMode: 'hide' | 'reveal' = 'hide';
+
   // Selected Assets
   public selectedTerrain: TileType = TileType.STONE_FLOOR;
   public selectedLiquid: LiquidType = LiquidType.WATER_SHALLOW;
@@ -39,6 +54,11 @@ class EditorApp {
   public propWidth = 1;    // default 1 quadratino
   public propHeight = 1;   // default 1 quadratino
 
+  // Brush (landscape-style painting) settings
+  public brushRadius = 2;        // in tiles (like UE brush size)
+  public brushHardness = 0.6;    // 0.0 = fully soft, 1.0 = hard edge
+  public brushOpacity = 0.85;    // 0.0 to 1.0 (scatter probability at falloff)
+
   public lightSettings = {
     radius: 4.5,
     intensity: 0.8,
@@ -46,8 +66,19 @@ class EditorApp {
     flicker: true
   };
 
+  // Foliage Overlay Brush Settings (Unreal Engine Foliage style)
+  public selectedFoliageVariantId = 0;
+  public selectedFoliageType: FoliageType = 'grass_tuft_lush';
+  public foliageBrushRadius = 1.8;  // in tiles
+  public foliageDensity = 16;       // candidates per stroke
+  public foliageMinDistance = 0.28; // Poisson-disk exclusion radius (in tiles)
+  public foliageScale = 1.0;        // base size
+  public foliageScaleJitter = 0.3;  // size variation ±30%
+  public foliageBrush: FoliageBrush;
+
   // Eraser Filters (Selective removal)
   public eraseFilters = {
+    foliage: true, // Erba & fasci d'erba sovrapposti
     props: true,
     lights: true,
     liquid: true,
@@ -71,11 +102,23 @@ class EditorApp {
   public animateWater = true;
   public showLighting = true;
 
+  // Presentation Mode
+  public isPresentationOpen = false;
+  public presentationRenderer: ViewportRenderer | null = null;
+  private isPresPanning = false;
+  private presPanStart = { x: 0, y: 0 };
+  private presHintTimeout: number | null = null;
+
+  // Dual Screen / External Pop-out Window
+  public externalWindow: Window | null = null;
+  public externalRenderer: ViewportRenderer | null = null;
+
   // Modal State
   private pendingAssetFile: string | null = null;
 
   constructor() {
     this.tileMap = new TileMap(30, 25, 100);
+    this.foliageBrush = new FoliageBrush(this.tileMap.foliageIndex);
     this.assetManager = new AssetManager();
     const canvas = document.getElementById('viewport-canvas') as HTMLCanvasElement;
     this.renderer = new ViewportRenderer(canvas, this.assetManager);
@@ -89,6 +132,8 @@ class EditorApp {
     this.initCanvasEvents();
     this.initKeyboardShortcuts();
     this.initModalEvents();
+    this.initPresentationEvents();
+    this.initMapLibraryEvents();
     this.updatePaletteUI();
     this.updateStatusTelemetry();
 
@@ -125,10 +170,56 @@ class EditorApp {
           activePropId: this.selectedPropAssetId,
           propRotation: this.propRotation,
           propWidth: this.propWidth,
-          propHeight: this.propHeight
+          propHeight: this.propHeight,
+          // Brush tool params for preview rendering
+          brushMode: this.brushMode,
+          brushRadius: this.brushRadius,
+          brushHardness: this.brushHardness,
+          brushOpacity: this.brushOpacity,
+          // Foliage brush preview options
+          foliageBrushRadius: this.foliageBrushRadius,
+          foliageType: this.selectedFoliageType,
+          // Fog of War options
+          showFog: this.showFog,
+          isPlayerView: false,
+          fogMode: this.fogMode
         },
         timestamp
       );
+
+      // Render Presentation View if open (pure map, no tools/brushes/UI, player fog view)
+      if (this.isPresentationOpen && this.presentationRenderer) {
+        this.presentationRenderer.render(
+          this.tileMap,
+          {
+            showGrid: this.showGrid,
+            gridThickness: this.gridThickness,
+            animateWater: this.animateWater,
+            showLighting: this.showLighting,
+            showFog: true,
+            isPlayerView: true,
+            activeTool: 'none'
+          },
+          timestamp
+        );
+      }
+
+      // Render External Dual Screen Window if open (pure map for players on 2nd monitor)
+      if (this.externalWindow && !this.externalWindow.closed && this.externalRenderer) {
+        this.externalRenderer.render(
+          this.tileMap,
+          {
+            showGrid: this.showGrid,
+            gridThickness: this.gridThickness,
+            animateWater: this.animateWater,
+            showLighting: this.showLighting,
+            showFog: true,
+            isPlayerView: true,
+            activeTool: 'none'
+          },
+          timestamp
+        );
+      }
 
       requestAnimationFrame(loop);
     };
@@ -173,6 +264,8 @@ class EditorApp {
         modeBtns.forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         this.brushMode = btn.dataset.mode as BrushMode;
+        // Refresh palette to show/hide brush controls
+        this.updatePaletteUI();
       });
     });
 
@@ -193,6 +286,9 @@ class EditorApp {
 
     const chkLighting = document.getElementById('chk-lighting') as HTMLInputElement;
     chkLighting?.addEventListener('change', () => { this.showLighting = chkLighting.checked; });
+
+    const chkFog = document.getElementById('chk-fog') as HTMLInputElement;
+    chkFog?.addEventListener('change', () => { this.showFog = chkFog.checked; });
 
     // Eraser Settings Button & Popover
     const btnEraserSettings = document.getElementById('btn-eraser-settings');
@@ -230,6 +326,7 @@ class EditorApp {
         });
       }
     };
+    bindFilter('pop-ef-foliage', 'foliage');
     bindFilter('pop-ef-props', 'props');
     bindFilter('pop-ef-lights', 'lights');
     bindFilter('pop-ef-liquid', 'liquid');
@@ -343,10 +440,24 @@ class EditorApp {
       return;
     }
 
+    if (this.activeTool === 'foliage') {
+      titleEl.textContent = 'Foliage & Fasci d\'Erba';
+      subEl.textContent = 'Strato erba sovrapposto (stile Unreal Engine)';
+      this.renderFoliageControls(bodyEl);
+      return;
+    }
+
     if (this.activeTool === 'light') {
       titleEl.textContent = 'Sorgenti di Luce';
       subEl.textContent = 'Illuminazione dinamica VTT';
       this.renderLightControls(bodyEl);
+      return;
+    }
+
+    if (this.activeTool === 'fog') {
+      titleEl.textContent = 'Nebbia di Guerra';
+      subEl.textContent = 'Nascondi o rivela aree ai giocatori';
+      this.renderFogControls(bodyEl);
       return;
     }
 
@@ -360,6 +471,7 @@ class EditorApp {
         </div>
 
         <div style="display: flex; flex-direction: column; gap: 0.45rem; background: var(--bg-input); padding: 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+          <label class="checkbox-label"><input type="checkbox" id="ef-panel-foliage" ${this.eraseFilters.foliage ? 'checked' : ''} /> <strong>🌿 Erba & Foliage Sovrapposto</strong></label>
           <label class="checkbox-label"><input type="checkbox" id="ef-panel-props" ${this.eraseFilters.props ? 'checked' : ''} /> <strong>📦 Oggetti / Props</strong></label>
           <label class="checkbox-label"><input type="checkbox" id="ef-panel-lights" ${this.eraseFilters.lights ? 'checked' : ''} /> <strong>🔥 Luci Dinamiche</strong></label>
           <label class="checkbox-label"><input type="checkbox" id="ef-panel-liquid" ${this.eraseFilters.liquid ? 'checked' : ''} /> <strong>🌊 Liquidi (Acqua, Lava, Veleno)</strong></label>
@@ -388,6 +500,7 @@ class EditorApp {
           if (popChk) popChk.checked = chk.checked;
         });
       };
+      bindPanelCheck('ef-panel-foliage', 'pop-ef-foliage', 'foliage');
       bindPanelCheck('ef-panel-props', 'pop-ef-props', 'props');
       bindPanelCheck('ef-panel-lights', 'pop-ef-lights', 'lights');
       bindPanelCheck('ef-panel-liquid', 'pop-ef-liquid', 'liquid');
@@ -432,6 +545,11 @@ class EditorApp {
     // If Prop tool or prop category selected, show dimension and rotation controls
     if (this.activeTool === 'prop' || this.activeCategoryFilter === 'prop') {
       this.renderPropSizeControls(bodyEl);
+    }
+
+    // If brush mode is active and tool is terrain/liquid, show brush controls
+    if (this.brushMode === 'brush' && (this.activeTool === 'terrain' || this.activeTool === 'liquid')) {
+      this.renderBrushControls(bodyEl);
     }
 
     // If Door tool or door category selected, also show door state controls
@@ -583,6 +701,7 @@ class EditorApp {
       const el = document.getElementById(id) as HTMLInputElement;
       if (el) el.checked = val;
     };
+    set('pop-ef-foliage', this.eraseFilters.foliage);
     set('pop-ef-props', this.eraseFilters.props);
     set('pop-ef-lights', this.eraseFilters.lights);
     set('pop-ef-liquid', this.eraseFilters.liquid);
@@ -687,6 +806,298 @@ class EditorApp {
     });
   }
 
+  /**
+   * Brush Controls Panel � shown when brushMode === 'brush' and terrain/liquid tool active.
+   * Mimics Unreal Engine Landscape Brush controls: Radius, Hardness, Opacity/Strength.
+   */
+  private renderBrushControls(container: HTMLElement): void {
+    const ctrl = document.createElement('div');
+    ctrl.className = 'palette-control';
+    ctrl.style.marginTop = '0.6rem';
+    ctrl.style.paddingTop = '0.6rem';
+    ctrl.style.borderTop = '1px solid var(--border)';
+    ctrl.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.5rem;">
+        <span style="font-size: 0.95rem;">???</span>
+        <strong style="font-size: 0.82rem; color: var(--primary);">Brush Circolare (Landscape)</strong>
+      </div>
+
+      <div class="palette-control-row">
+        <span>Raggio:</span>
+        <strong id="val-brush-radius"> celle</strong>
+      </div>
+      <input type="range" id="slider-brush-radius" min="1" max="12" step="0.5" value="" />
+
+      <div class="palette-control-row" style="margin-top: 0.5rem;">
+        <span>Durezza (Hardness):</span>
+        <strong id="val-brush-hardness">%</strong>
+      </div>
+      <input type="range" id="slider-brush-hardness" min="0" max="1" step="0.05" value="" />
+      <div style="font-size: 0.68rem; color: var(--text-dim); margin-top: 0.1rem;">
+        0% = bordo morbido � 100% = bordo netto
+      </div>
+
+      <div class="palette-control-row" style="margin-top: 0.5rem;">
+        <span>Forza / Opacit�:</span>
+        <strong id="val-brush-opacity">%</strong>
+      </div>
+      <input type="range" id="slider-brush-opacity" min="0.1" max="1" step="0.05" value="" />
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.3rem; margin-top: 0.5rem;">
+        <button class="btn btn-secondary btn-xs brush-preset" data-r="1" data-h="0.9" data-o="1.0" title="Piccolo e preciso">S 1�</button>
+        <button class="btn btn-secondary btn-xs brush-preset" data-r="3" data-h="0.6" data-o="0.85" title="Medio bilanciato">M 3�</button>
+        <button class="btn btn-secondary btn-xs brush-preset" data-r="6" data-h="0.4" data-o="0.7" title="Grande morbido">L 6�</button>
+      </div>
+
+      <div style="font-size: 0.7rem; color: var(--text-dim); margin-top: 0.5rem; line-height: 1.4; border-top: 1px solid var(--border); padding-top: 0.4rem;">
+        ?? <em>Trascina con il tasto sinistro. Il bordo morbido crea transizioni naturali come il Landscape Tool di Unreal Engine.</em>
+      </div>
+    `;
+    container.appendChild(ctrl);
+
+    const slR = ctrl.querySelector('#slider-brush-radius') as HTMLInputElement;
+    const valR = ctrl.querySelector('#val-brush-radius')!;
+    slR?.addEventListener('input', () => {
+      this.brushRadius = parseFloat(slR.value);
+      valR.textContent = `${this.brushRadius} celle`;
+    });
+
+    const slH = ctrl.querySelector('#slider-brush-hardness') as HTMLInputElement;
+    const valH = ctrl.querySelector('#val-brush-hardness')!;
+    slH?.addEventListener('input', () => {
+      this.brushHardness = parseFloat(slH.value);
+      valH.textContent = `${Math.round(this.brushHardness * 100)}%`;
+    });
+
+    const slO = ctrl.querySelector('#slider-brush-opacity') as HTMLInputElement;
+    const valO = ctrl.querySelector('#val-brush-opacity')!;
+    slO?.addEventListener('input', () => {
+      this.brushOpacity = parseFloat(slO.value);
+      valO.textContent = `${Math.round(this.brushOpacity * 100)}%`;
+    });
+
+    ctrl.querySelectorAll<HTMLButtonElement>('.brush-preset').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.brushRadius = parseFloat(btn.dataset.r ?? '2');
+        this.brushHardness = parseFloat(btn.dataset.h ?? '0.6');
+        this.brushOpacity = parseFloat(btn.dataset.o ?? '0.85');
+        this.updatePaletteUI();
+      });
+    });
+  }
+
+  /**
+   * Foliage & Grass Overlay Controls Panel (Unreal Engine Foliage Brush style).
+   */
+  private renderFoliageControls(container: HTMLElement): void {
+    const typeGrid = document.createElement('div');
+    typeGrid.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr; gap: 0.35rem; margin-bottom: 0.75rem;';
+
+    FOLIAGE_VARIANTS.forEach(ft => {
+      const btn = document.createElement('button');
+      btn.className = `btn btn-secondary btn-xs ${this.selectedFoliageVariantId === ft.id ? 'active' : ''}`;
+      btn.style.cssText = 'display: flex; align-items: center; gap: 0.35rem; padding: 0.45rem 0.5rem; text-align: left; height: auto; border: 1px solid var(--border);';
+      btn.innerHTML = `<span style="font-size: 1.15rem;">${ft.icon}</span><span style="font-size: 0.73rem; line-height: 1.2;"><strong>${ft.name}</strong></span>`;
+      btn.title = ft.description;
+      btn.addEventListener('click', () => {
+        this.selectedFoliageVariantId = ft.id;
+        this.selectedFoliageType = ft.key as FoliageType;
+        this.updatePaletteUI();
+      });
+      typeGrid.appendChild(btn);
+    });
+
+    container.appendChild(typeGrid);
+
+    // Current wind angle in degrees
+    const currentWindAngleDeg = Math.round(
+      (Math.atan2(this.tileMap.windDirection[1], this.tileMap.windDirection[0]) * 180) / Math.PI + 360
+    ) % 360;
+
+    // Sliders & Controls Panel
+    const ctrl = document.createElement('div');
+    ctrl.className = 'palette-control';
+    ctrl.style.marginTop = '0.5rem';
+    ctrl.innerHTML = `
+      <!-- 1. Brush Radius -->
+      <div class="palette-control-row">
+        <span>Raggio Pennello:</span>
+        <strong id="val-foliage-radius" style="color: var(--primary);">${this.foliageBrushRadius} celle</strong>
+      </div>
+      <input type="range" id="slider-foliage-radius" min="0.5" max="6.0" step="0.25" value="${this.foliageBrushRadius}" />
+
+      <!-- 2. Density -->
+      <div class="palette-control-row" style="margin-top: 0.5rem;">
+        <span>Densità di Spargimento:</span>
+        <strong id="val-foliage-density" style="color: var(--primary);">${this.foliageDensity} campioni</strong>
+      </div>
+      <input type="range" id="slider-foliage-density" min="2" max="40" step="1" value="${this.foliageDensity}" />
+
+      <!-- 3. Poisson-Disk Min Distance -->
+      <div class="palette-control-row" style="margin-top: 0.5rem;">
+        <span>Spaziatura Poisson-Disk (Min Dist):</span>
+        <strong id="val-foliage-mindist" style="color: var(--primary);">${this.foliageMinDistance} celle</strong>
+      </div>
+      <input type="range" id="slider-foliage-mindist" min="0.10" max="0.80" step="0.02" value="${this.foliageMinDistance}" />
+      <div style="font-size: 0.67rem; color: var(--text-dim); margin-top: 0.15rem;">
+        Distribuzione Blue-Noise: previene sovrapposizioni innaturali.
+      </div>
+
+      <!-- 4. Scale & Jitter -->
+      <div class="palette-control-row" style="margin-top: 0.5rem;">
+        <span>Dimensione Media (Scala):</span>
+        <strong id="val-foliage-scale" style="color: var(--primary);">${Math.round(this.foliageScale * 100)}%</strong>
+      </div>
+      <input type="range" id="slider-foliage-scale" min="0.5" max="2.2" step="0.05" value="${this.foliageScale}" />
+
+      <!-- 5. Presets -->
+      <div style="display: flex; gap: 0.3rem; margin-top: 0.6rem;">
+        <button id="btn-foliage-preset-dense" class="btn btn-secondary btn-xs" style="flex:1;">🌿 Folta</button>
+        <button id="btn-foliage-preset-light" class="btn btn-secondary btn-xs" style="flex:1;">🌾 Rada</button>
+        <button id="btn-foliage-preset-huge" class="btn btn-secondary btn-xs" style="flex:1;">🌳 Grande</button>
+      </div>
+
+      <!-- 6. Wind Shader Controls -->
+      <div style="margin-top: 0.8rem; border-top: 1px solid var(--border); padding-top: 0.6rem;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.35rem;">
+          <strong style="font-size: 0.78rem; color: var(--primary);">💨 Shader Vento (GLSL)</strong>
+          <span id="wind-compass-icon" style="display: inline-block; transform: rotate(${currentWindAngleDeg}deg); font-size: 1.1rem; transition: transform 0.1s;">➔</span>
+        </div>
+
+        <div class="palette-control-row">
+          <span>Forza Vento (uWindStrength):</span>
+          <strong id="val-wind-strength" style="color: var(--primary);">${Math.round(this.tileMap.windStrength * 100)}%</strong>
+        </div>
+        <input type="range" id="slider-wind-strength" min="0.0" max="2.0" step="0.05" value="${this.tileMap.windStrength}" />
+
+        <div class="palette-control-row" style="margin-top: 0.4rem;">
+          <span>Direzione Vento (uWindDirection):</span>
+          <strong id="val-wind-dir" style="color: var(--primary);">${currentWindAngleDeg}°</strong>
+        </div>
+        <input type="range" id="slider-wind-dir" min="0" max="359" step="5" value="${currentWindAngleDeg}" />
+      </div>
+
+      <!-- 7. JSON Layer Actions & Memory -->
+      <div style="margin-top: 0.8rem; border-top: 1px solid var(--border); padding-top: 0.6rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+          <span style="font-size: 0.72rem; color: var(--text-muted);">Ciuffi GPU: <strong style="color: #4ade80;">${this.tileMap.foliage.length}</strong></span>
+          <button id="btn-clear-foliage" class="btn btn-secondary btn-xs" style="color: #ef4444;" title="Rimuovi tutti i ciuffi d'erba dalla mappa">Pulisci Foliage</button>
+        </div>
+
+        <div style="display: flex; gap: 0.35rem; margin-top: 0.4rem;">
+          <button id="btn-export-foliage-json" class="btn btn-secondary btn-xs" style="flex:1;" title="Esporta e copia lo schema JSON del layer foliage">💾 Esporta JSON</button>
+          <button id="btn-import-foliage-json" class="btn btn-secondary btn-xs" style="flex:1;" title="Carica layer foliage da JSON">📂 Importa JSON</button>
+        </div>
+      </div>
+
+      <div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 0.6rem; line-height: 1.4; background: rgba(34, 197, 94, 0.08); padding: 0.5rem; border-radius: var(--radius-sm); border: 1px solid rgba(34, 197, 94, 0.2);">
+        ⚡ <strong>Batch GPU Instancing:</strong> Rendering a <strong>singola Draw Call WebGL</strong> con vertici ancorati alla base e flessione elastica realistica in tempo reale.
+      </div>
+    `;
+
+    container.appendChild(ctrl);
+
+    const slR = ctrl.querySelector('#slider-foliage-radius') as HTMLInputElement;
+    const valR = ctrl.querySelector('#val-foliage-radius')!;
+    slR?.addEventListener('input', () => {
+      this.foliageBrushRadius = parseFloat(slR.value);
+      valR.textContent = `${this.foliageBrushRadius} celle`;
+    });
+
+    const slD = ctrl.querySelector('#slider-foliage-density') as HTMLInputElement;
+    const valD = ctrl.querySelector('#val-foliage-density')!;
+    slD?.addEventListener('input', () => {
+      this.foliageDensity = parseInt(slD.value, 10);
+      valD.textContent = `${this.foliageDensity} campioni`;
+    });
+
+    const slMD = ctrl.querySelector('#slider-foliage-mindist') as HTMLInputElement;
+    const valMD = ctrl.querySelector('#val-foliage-mindist')!;
+    slMD?.addEventListener('input', () => {
+      this.foliageMinDistance = parseFloat(slMD.value);
+      valMD.textContent = `${this.foliageMinDistance} celle`;
+    });
+
+    const slS = ctrl.querySelector('#slider-foliage-scale') as HTMLInputElement;
+    const valS = ctrl.querySelector('#val-foliage-scale')!;
+    slS?.addEventListener('input', () => {
+      this.foliageScale = parseFloat(slS.value);
+      valS.textContent = `${Math.round(this.foliageScale * 100)}%`;
+    });
+
+    // Wind sliders
+    const slWS = ctrl.querySelector('#slider-wind-strength') as HTMLInputElement;
+    const valWS = ctrl.querySelector('#val-wind-strength')!;
+    slWS?.addEventListener('input', () => {
+      this.tileMap.windStrength = parseFloat(slWS.value);
+      valWS.textContent = `${Math.round(this.tileMap.windStrength * 100)}%`;
+    });
+
+    const slWD = ctrl.querySelector('#slider-wind-dir') as HTMLInputElement;
+    const valWD = ctrl.querySelector('#val-wind-dir')!;
+    const compassIcon = ctrl.querySelector('#wind-compass-icon') as HTMLElement;
+    slWD?.addEventListener('input', () => {
+      const deg = parseFloat(slWD.value);
+      const rad = (deg * Math.PI) / 180;
+      this.tileMap.windDirection = [Math.cos(rad), Math.sin(rad)];
+      valWD.textContent = `${deg}°`;
+      if (compassIcon) compassIcon.style.transform = `rotate(${deg}deg)`;
+    });
+
+    ctrl.querySelector('#btn-foliage-preset-dense')?.addEventListener('click', () => {
+      this.foliageBrushRadius = 2.0;
+      this.foliageDensity = 24;
+      this.foliageMinDistance = 0.22;
+      this.foliageScale = 1.0;
+      this.updatePaletteUI();
+    });
+
+    ctrl.querySelector('#btn-foliage-preset-light')?.addEventListener('click', () => {
+      this.foliageBrushRadius = 1.6;
+      this.foliageDensity = 8;
+      this.foliageMinDistance = 0.40;
+      this.foliageScale = 0.85;
+      this.updatePaletteUI();
+    });
+
+    ctrl.querySelector('#btn-foliage-preset-huge')?.addEventListener('click', () => {
+      this.foliageBrushRadius = 3.2;
+      this.foliageDensity = 18;
+      this.foliageMinDistance = 0.35;
+      this.foliageScale = 1.6;
+      this.updatePaletteUI();
+    });
+
+    ctrl.querySelector('#btn-clear-foliage')?.addEventListener('click', () => {
+      if (confirm('Vuoi rimuovere tutti i ciuffi di foliage dalla mappa?')) {
+        this.tileMap.saveState();
+        this.tileMap.foliage = [];
+        this.tileMap.foliageIndex.clear();
+        this.updatePaletteUI();
+      }
+    });
+
+    // JSON Export / Import buttons
+    ctrl.querySelector('#btn-export-foliage-json')?.addEventListener('click', () => {
+      const jsonStr = FoliageModel.toJSON(this.tileMap.exportFoliageJSON());
+      navigator.clipboard?.writeText(jsonStr).then(() => {
+        alert(`Schema JSON Foliage esportato e copiato negli appunti! (${this.tileMap.foliage.length} ciuffi)`);
+      }).catch(() => {
+        prompt('Copia il JSON del layer Foliage:', jsonStr);
+      });
+    });
+
+    ctrl.querySelector('#btn-import-foliage-json')?.addEventListener('click', () => {
+      const input = prompt('Incolla qui il codice JSON del layer Foliage:');
+      if (input) {
+        const parsed = FoliageModel.fromJSON(input);
+        this.tileMap.importFoliageJSON(parsed);
+        this.updatePaletteUI();
+        alert(`Caricati con successo ${parsed.instances.length} ciuffi d'erba!`);
+      }
+    });
+  }
+
   private renderLightControls(container: HTMLElement): void {
     const ctrl = document.createElement('div');
     ctrl.className = 'palette-control';
@@ -738,6 +1149,74 @@ class EditorApp {
     const flickerChk = ctrl.querySelector('#chk-light-flicker') as HTMLInputElement;
     flickerChk?.addEventListener('change', () => {
       this.lightSettings.flicker = flickerChk.checked;
+    });
+  }
+
+  // --- Fog of War Controls ---
+  private renderFogControls(container: HTMLElement): void {
+    const ctrl = document.createElement('div');
+    ctrl.className = 'palette-control';
+    ctrl.innerHTML = `
+      <div class="fog-mode-switch">
+        <button id="btn-fog-hide" class="btn ${this.fogMode === 'hide' ? 'btn-primary' : 'btn-secondary'}">
+          🌫️ Nascondi (Nebbia)
+        </button>
+        <button id="btn-fog-reveal" class="btn ${this.fogMode === 'reveal' ? 'btn-primary' : 'btn-secondary'}">
+          👁️ Rivela (Cancella)
+        </button>
+      </div>
+
+      <div style="display: flex; gap: 0.5rem; margin-bottom: 0.85rem;">
+        <button id="btn-fog-fill-all" class="btn btn-secondary btn-sm" style="flex: 1; font-size: 0.72rem;" title="Copri tutta la mappa con la nebbia">
+          🌫️ Copri Tutto
+        </button>
+        <button id="btn-fog-clear-all" class="btn btn-secondary btn-sm" style="flex: 1; font-size: 0.72rem;" title="Rivela l'intera mappa ai giocatori">
+          👁️ Rivela Tutto
+        </button>
+      </div>
+
+      <div class="palette-control-row">
+        <span>Raggio Pennello:</span>
+        <strong id="val-fog-radius">${this.brushRadius} celle</strong>
+      </div>
+      <input type="range" id="slider-fog-radius" min="1" max="6" step="1" value="${this.brushRadius}" />
+
+      <div style="margin-top: 1rem; padding: 0.75rem; background: var(--bg-input); border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 0.75rem; color: var(--text-muted); line-height: 1.45;">
+        <p style="color: var(--primary); font-weight: 600; margin-bottom: 0.35rem;">💡 Nebbia di Guerra VTT:</p>
+        <p>• <strong>Nell'Editor</strong>: vedi le zone coperte come un velo scuro semitrasparente per poter continuare a lavorare.</p>
+        <p style="margin-top: 0.25rem;">• <strong>Presentazione / 2° Schermo</strong>: le zone nascoste appaiono <strong>totalmente oscurate (nere)</strong> ai giocatori!</p>
+      </div>
+    `;
+
+    container.appendChild(ctrl);
+
+    ctrl.querySelector('#btn-fog-hide')?.addEventListener('click', () => {
+      this.fogMode = 'hide';
+      this.updatePaletteUI();
+    });
+
+    ctrl.querySelector('#btn-fog-reveal')?.addEventListener('click', () => {
+      this.fogMode = 'reveal';
+      this.updatePaletteUI();
+    });
+
+    ctrl.querySelector('#btn-fog-fill-all')?.addEventListener('click', () => {
+      this.tileMap.saveState();
+      this.tileMap.fillFog(true);
+      this.updateStatusTelemetry();
+    });
+
+    ctrl.querySelector('#btn-fog-clear-all')?.addEventListener('click', () => {
+      this.tileMap.saveState();
+      this.tileMap.fillFog(false);
+      this.updateStatusTelemetry();
+    });
+
+    const radiusSlider = ctrl.querySelector('#slider-fog-radius') as HTMLInputElement;
+    const radiusVal = ctrl.querySelector('#val-fog-radius')!;
+    radiusSlider?.addEventListener('input', () => {
+      this.brushRadius = parseInt(radiusSlider.value, 10);
+      radiusVal.textContent = `${this.brushRadius} celle`;
     });
   }
 
@@ -855,6 +1334,563 @@ class EditorApp {
     reader.readAsDataURL(file);
   }
 
+  // --- Presentation Mode Events ---
+  private initPresentationEvents(): void {
+    const btnPres = document.getElementById('btn-presentation');
+    const btnSidebarPres = document.getElementById('btn-sidebar-presentation');
+    const btnSidebarDual = document.getElementById('btn-sidebar-dual-screen');
+    const btnPopout = document.getElementById('btn-pres-popout');
+    const modal = document.getElementById('presentation-modal');
+    const card = document.getElementById('presentation-card');
+    const canvas = document.getElementById('presentation-canvas') as HTMLCanvasElement;
+    const btnClose = document.getElementById('btn-pres-close');
+    const btnCloseFooter = document.getElementById('btn-pres-close-footer');
+    const btnFit = document.getElementById('btn-pres-fit');
+    const btnZoomIn = document.getElementById('btn-pres-zoom-in');
+    const btnZoomOut = document.getElementById('btn-pres-zoom-out');
+    const btnFullscreen = document.getElementById('btn-pres-fullscreen');
+
+    if (!modal || !canvas) return;
+
+    const openPresentation = () => {
+      modal.style.display = 'flex';
+      this.isPresentationOpen = true;
+
+      if (!this.presentationRenderer) {
+        this.presentationRenderer = new ViewportRenderer(canvas, this.assetManager);
+        this.presentationRenderer.atlas = this.renderer.atlas;
+      }
+
+      // Allow DOM layout to compute card dimensions before sizing canvas
+      requestAnimationFrame(() => {
+        if (this.presentationRenderer) {
+          this.presentationRenderer.resizeCanvasToContainer();
+          this.presentationRenderer.centerOnMap(this.tileMap);
+        }
+      });
+    };
+
+    const closePresentation = () => {
+      modal.style.display = 'none';
+      this.isPresentationOpen = false;
+      card?.classList.remove('is-fullscreen');
+    };
+
+    btnPres?.addEventListener('click', openPresentation);
+    btnSidebarPres?.addEventListener('click', openPresentation);
+    btnClose?.addEventListener('click', closePresentation);
+    btnCloseFooter?.addEventListener('click', closePresentation);
+
+    // Close when clicking directly on the backdrop outside the card
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        closePresentation();
+      }
+    });
+
+    // ── DRAGGABLE MODAL WINDOW ──────────────────────────────────────────
+    // Makes the presentation popup movable anywhere on screen
+    let isCardDragging = false;
+    let cardDragOffset = { x: 0, y: 0 };
+    const modalHeader = card?.querySelector('.modal-header') as HTMLElement;
+
+    modalHeader?.addEventListener('mousedown', (e) => {
+      // Don't drag if clicking buttons or if in fullscreen mode
+      if ((e.target as HTMLElement).closest('button') || card?.classList.contains('is-fullscreen')) {
+        return;
+      }
+      isCardDragging = true;
+      card?.classList.add('is-dragging');
+      const rect = card!.getBoundingClientRect();
+      cardDragOffset = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      };
+      // Fix position to current coordinates so it moves seamlessly
+      card!.style.position = 'fixed';
+      card!.style.margin = '0';
+      card!.style.left = `${rect.left}px`;
+      card!.style.top = `${rect.top}px`;
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isCardDragging || !card || card.classList.contains('is-fullscreen')) return;
+      const newLeft = Math.max(10, Math.min(window.innerWidth - 120, e.clientX - cardDragOffset.x));
+      const newTop = Math.max(10, Math.min(window.innerHeight - 60, e.clientY - cardDragOffset.y));
+      card.style.left = `${newLeft}px`;
+      card.style.top = `${newTop}px`;
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (isCardDragging) {
+        isCardDragging = false;
+        card?.classList.remove('is-dragging');
+      }
+    });
+
+    // Double-click header resets to centered
+    modalHeader?.addEventListener('dblclick', (e) => {
+      if ((e.target as HTMLElement).closest('button')) return;
+      if (card) {
+        card.style.position = '';
+        card.style.margin = '';
+        card.style.left = '';
+        card.style.top = '';
+        requestAnimationFrame(() => {
+          this.presentationRenderer?.resizeCanvasToContainer();
+          this.presentationRenderer?.centerOnMap(this.tileMap);
+        });
+      }
+    });
+
+    // ── DUAL SCREEN / SECOND MONITOR DETACHED WINDOW ─────────────────────
+    const openDualScreenWindow = () => {
+      if (this.externalWindow && !this.externalWindow.closed) {
+        this.externalWindow.focus();
+        return;
+      }
+
+      const screenW = Math.min(1920, screen.availWidth);
+      const screenH = Math.min(1080, screen.availHeight);
+      this.externalWindow = window.open(
+        '',
+        'vtt_external_presentation',
+        `width=${screenW},height=${screenH},menubar=no,toolbar=no,location=no,status=no,resizable=yes`
+      );
+
+      if (!this.externalWindow) {
+        alert('Impossibile aprire la finestra pop-up: consenti i pop-up del browser per abilitare la vista su 2° schermo.');
+        return;
+      }
+
+      this.externalWindow.document.write(`
+        <!DOCTYPE html>
+        <html lang="it">
+        <head>
+          <meta charset="UTF-8">
+          <title>VTT TileCraft - Vista Mappa (Secondo Schermo)</title>
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            html, body { width: 100%; height: 100%; overflow: hidden; background: #090b0e; user-select: none; }
+            #ext-canvas { width: 100vw; height: 100vh; display: block; cursor: grab; }
+            #ext-canvas:active { cursor: grabbing; }
+            .ext-hint {
+              position: absolute;
+              bottom: 18px;
+              left: 50%;
+              transform: translateX(-50%);
+              background: rgba(18, 21, 27, 0.85);
+              backdrop-filter: blur(10px);
+              border: 1px solid rgba(255, 255, 255, 0.15);
+              border-radius: 9999px;
+              color: #cbd5e1;
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+              font-size: 13px;
+              padding: 6px 18px;
+              pointer-events: none;
+              box-shadow: 0 4px 18px rgba(0, 0, 0, 0.6);
+              transition: opacity 0.8s ease;
+            }
+          </style>
+        </head>
+        <body>
+          <canvas id="ext-canvas"></canvas>
+          <div class="ext-hint" id="ext-hint">🖥️ Trascina questa finestra sul 2° schermo • Premi F11 per schermo intero</div>
+        </body>
+        </html>
+      `);
+      this.externalWindow.document.close();
+
+      const extCanvas = this.externalWindow.document.getElementById('ext-canvas') as HTMLCanvasElement;
+      this.externalRenderer = new ViewportRenderer(extCanvas, this.assetManager);
+      this.externalRenderer.atlas = this.renderer.atlas;
+
+      const resizeExt = () => {
+        if (!this.externalWindow || this.externalWindow.closed || !this.externalRenderer) return;
+        const dpr = this.externalWindow.devicePixelRatio || 1;
+        const w = this.externalWindow.innerWidth;
+        const h = this.externalWindow.innerHeight;
+        extCanvas.width = Math.floor(w * dpr);
+        extCanvas.height = Math.floor(h * dpr);
+        extCanvas.style.width = `${w}px`;
+        extCanvas.style.height = `${h}px`;
+      };
+
+      setTimeout(() => {
+        resizeExt();
+        this.externalRenderer?.centerOnMap(this.tileMap);
+      }, 50);
+
+      this.externalWindow.addEventListener('resize', () => resizeExt());
+
+      // Panning inside external window
+      let isExtPanning = false;
+      let extPanStart = { x: 0, y: 0 };
+
+      extCanvas.addEventListener('mousedown', (e) => {
+        isExtPanning = true;
+        extPanStart = { x: e.clientX, y: e.clientY };
+      });
+
+      this.externalWindow.addEventListener('mousemove', (e) => {
+        if (!isExtPanning || !this.externalRenderer) return;
+        const dx = e.clientX - extPanStart.x;
+        const dy = e.clientY - extPanStart.y;
+        this.externalRenderer.camera.x += dx;
+        this.externalRenderer.camera.y += dy;
+        extPanStart = { x: e.clientX, y: e.clientY };
+      });
+
+      this.externalWindow.addEventListener('mouseup', () => {
+        isExtPanning = false;
+      });
+
+      // Mouse wheel zoom inside external window
+      extCanvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        if (!this.externalRenderer) return;
+        const factor = e.deltaY < 0 ? 1.15 : 0.87;
+        const rect = extCanvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const cam = this.externalRenderer.camera;
+        const newZoom = Math.min(4.0, Math.max(0.1, cam.zoom * factor));
+        cam.x = mouseX - (mouseX - cam.x) * (newZoom / cam.zoom);
+        cam.y = mouseY - (mouseY - cam.y) * (newZoom / cam.zoom);
+        cam.zoom = newZoom;
+      }, { passive: false });
+
+      // Auto fade hint after 4s
+      const extHint = this.externalWindow.document.getElementById('ext-hint');
+      setTimeout(() => {
+        if (extHint) extHint.style.opacity = '0';
+      }, 4000);
+
+      this.externalWindow.addEventListener('beforeunload', () => {
+        this.externalRenderer = null;
+        this.externalWindow = null;
+      });
+    };
+
+    btnPopout?.addEventListener('click', openDualScreenWindow);
+    btnSidebarDual?.addEventListener('click', openDualScreenWindow);
+
+    // Toggle Fullscreen on the modal card
+    btnFullscreen?.addEventListener('click', () => {
+      card?.classList.toggle('is-fullscreen');
+      requestAnimationFrame(() => {
+        if (this.presentationRenderer) {
+          this.presentationRenderer.resizeCanvasToContainer();
+          this.presentationRenderer.centerOnMap(this.tileMap);
+        }
+      });
+    });
+
+    btnFit?.addEventListener('click', () => {
+      if (this.presentationRenderer) {
+        this.presentationRenderer.resizeCanvasToContainer();
+        this.presentationRenderer.centerOnMap(this.tileMap);
+      }
+    });
+
+    btnZoomIn?.addEventListener('click', () => {
+      if (this.presentationRenderer) {
+        this.zoomPresentation(1.25);
+      }
+    });
+
+    btnZoomOut?.addEventListener('click', () => {
+      if (this.presentationRenderer) {
+        this.zoomPresentation(0.8);
+      }
+    });
+
+    // Panning inside Presentation Canvas
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    canvas.addEventListener('mousedown', (e) => {
+      this.isPresPanning = true;
+      this.presPanStart = { x: e.clientX, y: e.clientY };
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!this.isPresentationOpen || !this.isPresPanning || !this.presentationRenderer) return;
+      const dx = e.clientX - this.presPanStart.x;
+      const dy = e.clientY - this.presPanStart.y;
+      this.presentationRenderer.camera.x += dx;
+      this.presentationRenderer.camera.y += dy;
+      this.presPanStart = { x: e.clientX, y: e.clientY };
+    });
+
+    window.addEventListener('mouseup', () => {
+      this.isPresPanning = false;
+    });
+
+    // Mouse wheel zoom
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      if (!this.presentationRenderer) return;
+      const factor = e.deltaY < 0 ? 1.15 : 0.87;
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const cam = this.presentationRenderer.camera;
+      const newZoom = Math.min(4.0, Math.max(0.1, cam.zoom * factor));
+      cam.x = mouseX - (mouseX - cam.x) * (newZoom / cam.zoom);
+      cam.y = mouseY - (mouseY - cam.y) * (newZoom / cam.zoom);
+      cam.zoom = newZoom;
+    }, { passive: false });
+
+    // Handle Escape key
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.isPresentationOpen) {
+        closePresentation();
+      }
+    });
+
+    // Handle window resize for presentation canvas
+    window.addEventListener('resize', () => {
+      if (this.isPresentationOpen && this.presentationRenderer) {
+        this.presentationRenderer.resizeCanvasToContainer();
+      }
+    });
+  }
+
+  private zoomPresentation(factor: number): void {
+    if (!this.presentationRenderer) return;
+    const canvas = this.presentationRenderer.canvas;
+    const dpr = window.devicePixelRatio || 1;
+    const centerX = (canvas.width / dpr) / 2;
+    const centerY = (canvas.height / dpr) / 2;
+    const cam = this.presentationRenderer.camera;
+    const newZoom = Math.min(4.0, Math.max(0.1, cam.zoom * factor));
+    cam.x = centerX - (centerX - cam.x) * (newZoom / cam.zoom);
+    cam.y = centerY - (centerY - cam.y) * (newZoom / cam.zoom);
+    cam.zoom = newZoom;
+  }
+
+  // --- Map Library & History Events ---
+  private initMapLibraryEvents(): void {
+    const modal = document.getElementById('modal-map-library') as HTMLElement;
+    const btnOpenTop = document.getElementById('btn-open-map-library');
+    const btnSaveTop = document.getElementById('btn-save-map-library');
+    const btnClose = document.getElementById('btn-close-library');
+    const btnCloseFooter = document.getElementById('btn-close-library-footer');
+    const btnNewMap = document.getElementById('btn-library-new-map');
+    const btnSaveCurrent = document.getElementById('btn-library-save-current');
+    const btnImportJSON = document.getElementById('btn-library-import-json');
+    const fileInput = document.getElementById('input-import-map-file') as HTMLInputElement;
+    const searchInput = document.getElementById('library-search-input') as HTMLInputElement;
+
+    const openLibrary = () => {
+      modal.style.display = 'flex';
+      this.renderMapLibrary();
+    };
+
+    const closeLibrary = () => {
+      modal.style.display = 'none';
+    };
+
+    btnOpenTop?.addEventListener('click', openLibrary);
+    btnClose?.addEventListener('click', closeLibrary);
+    btnCloseFooter?.addEventListener('click', closeLibrary);
+
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeLibrary();
+    });
+
+    btnSaveTop?.addEventListener('click', () => this.saveCurrentMapPrompt());
+    btnSaveCurrent?.addEventListener('click', () => this.saveCurrentMapPrompt());
+
+    btnNewMap?.addEventListener('click', () => {
+      if (confirm('Vuoi iniziare una nuova mappa vuota? Assicurati di aver salvato eventuali modifiche alla mappa corrente.')) {
+        this.currentMapId = null;
+        this.currentMapName = 'Nuova Mappa';
+        this.tileMap.clear();
+        this.renderer.centerOnMap(this.tileMap);
+        this.updateStatusTelemetry();
+        closeLibrary();
+      }
+    });
+
+    btnImportJSON?.addEventListener('click', () => fileInput?.click());
+    fileInput?.addEventListener('change', () => {
+      if (fileInput.files && fileInput.files.length > 0) {
+        this.importMapFromFile(fileInput.files[0], () => {
+          this.renderMapLibrary();
+        });
+      }
+    });
+
+    searchInput?.addEventListener('input', () => {
+      this.renderMapLibrary(searchInput.value);
+    });
+
+    // Close on Escape if library modal is open
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modal.style.display === 'flex') {
+        closeLibrary();
+      }
+    });
+  }
+
+  public saveCurrentMapPrompt(): void {
+    const defaultName = this.currentMapName || 'Mappa ' + new Date().toLocaleDateString('it-IT');
+    const name = prompt('Inserisci il nome per salvare la mappa nello storico:', defaultName);
+    if (!name || !name.trim()) return;
+
+    this.currentMapName = name.trim();
+    if (!this.currentMapId) {
+      this.currentMapId = `map_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    }
+
+    const thumb = MapStorage.generateThumbnail(this.tileMap, this.renderer.atlas);
+    const mapData = this.tileMap.exportJSON(this.currentMapName);
+
+    const entry: SavedMapEntry = {
+      id: this.currentMapId,
+      name: this.currentMapName,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      width: this.tileMap.width,
+      height: this.tileMap.height,
+      pixelsPerGrid: this.tileMap.pixelsPerGrid,
+      thumbnailUrl: thumb,
+      data: mapData
+    };
+
+    MapStorage.saveMap(entry);
+    this.renderMapLibrary();
+    alert(`Mappa "${this.currentMapName}" salvata con successo nello storico!`);
+  }
+
+  public renderMapLibrary(query = ''): void {
+    const grid = document.getElementById('library-grid');
+    const countEl = document.getElementById('library-count-text');
+    if (!grid) return;
+
+    grid.innerHTML = '';
+    let maps = MapStorage.getAllMaps();
+
+    if (query.trim()) {
+      const q = query.toLowerCase();
+      maps = maps.filter(m => m.name.toLowerCase().includes(q));
+    }
+
+    if (countEl) {
+      countEl.textContent = `${maps.length} ${maps.length === 1 ? 'mappa salvata' : 'mappe salvate'}`;
+    }
+
+    if (maps.length === 0) {
+      grid.innerHTML = `
+        <div class="library-empty">
+          <span class="library-empty-icon">🗺️</span>
+          <h3>Nessuna mappa trovata nello storico</h3>
+          <p>Salva la mappa corrente cliccando su "Salva Corrente" oppure importa un file .json!</p>
+        </div>
+      `;
+      return;
+    }
+
+    for (const map of maps) {
+      const card = document.createElement('div');
+      card.className = 'library-card-item';
+
+      const dateStr = new Date(map.updatedAt).toLocaleDateString('it-IT', {
+        day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+      });
+
+      card.innerHTML = `
+        <div class="library-thumb-wrap">
+          ${map.thumbnailUrl ? `<img src="${map.thumbnailUrl}" alt="${map.name}" />` : `<span class="library-thumb-placeholder">🗺️</span>`}
+        </div>
+        <div class="library-card-info">
+          <div class="library-card-title" title="${map.name}">${map.name}</div>
+          <div class="library-card-meta">
+            <span>📐 ${map.width} × ${map.height} celle</span>
+            <span>🕒 ${dateStr}</span>
+          </div>
+        </div>
+        <div class="library-card-actions">
+          <button class="btn btn-primary btn-load-map" title="Carica questa mappa nell'editor">▶ Carica</button>
+          <button class="btn btn-secondary btn-duplicate-map" title="Duplica mappa">📋</button>
+          <button class="btn btn-secondary btn-export-map" title="Scarica file .json">💾</button>
+          <button class="btn btn-danger btn-delete-map" title="Elimina dallo storico">🗑️</button>
+        </div>
+      `;
+
+      card.querySelector('.btn-load-map')?.addEventListener('click', () => {
+        if (confirm(`Vuoi caricare la mappa "${map.name}"? Le modifiche non salvate alla mappa attuale andranno perse.`)) {
+          this.currentMapId = map.id;
+          this.currentMapName = map.name;
+          this.tileMap.loadFromJSON(map.data);
+          this.renderer.centerOnMap(this.tileMap);
+          this.updateStatusTelemetry();
+          const modal = document.getElementById('modal-map-library');
+          if (modal) modal.style.display = 'none';
+        }
+      });
+
+      card.querySelector('.btn-duplicate-map')?.addEventListener('click', () => {
+        MapStorage.duplicateMap(map.id);
+        this.renderMapLibrary(query);
+      });
+
+      card.querySelector('.btn-export-map')?.addEventListener('click', () => {
+        MapStorage.triggerDownloadJSON(`${map.name}.json`, map.data);
+      });
+
+      card.querySelector('.btn-delete-map')?.addEventListener('click', () => {
+        if (confirm(`Sei sicuro di voler eliminare definitivamente "${map.name}" dallo storico?`)) {
+          MapStorage.deleteMap(map.id);
+          if (this.currentMapId === map.id) {
+            this.currentMapId = null;
+          }
+          this.renderMapLibrary(query);
+        }
+      });
+
+      grid.appendChild(card);
+    }
+  }
+
+  private importMapFromFile(file: File, onSuccess: () => void): void {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result as string;
+        const parsed = JSON.parse(text) as TileMapJSON;
+        if (!parsed.width || !parsed.height || !Array.isArray(parsed.terrain)) {
+          alert('Il file selezionato non è un formato mappa VTT valido.');
+          return;
+        }
+
+        const mapName = parsed.name || file.name.replace(/\.[^/.]+$/, '');
+        const newId = `map_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+        const entry: SavedMapEntry = {
+          id: newId,
+          name: mapName,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          width: parsed.width,
+          height: parsed.height,
+          pixelsPerGrid: parsed.pixelsPerGrid || 100,
+          data: parsed
+        };
+
+        MapStorage.saveMap(entry);
+        onSuccess();
+        alert(`Mappa "${mapName}" importata con successo nello storico!`);
+      } catch (err) {
+        alert('Errore durante la lettura del file JSON: ' + err);
+      }
+    };
+    reader.readAsText(file);
+  }
+
   // --- Canvas Interaction ---
   private initCanvasEvents(): void {
     const canvas = this.renderer.canvas;
@@ -879,10 +1915,13 @@ class EditorApp {
         const tile = this.renderer.worldToTile(world.x, world.y, this.tileMap.pixelsPerGrid);
         this.dragStartTile = { ...tile };
 
-        if (this.brushMode === 'single') {
+        if (this.activeTool === 'foliage' || this.brushMode === 'single') {
           this.applyToolAt(world.x, world.y, true);
         } else if (this.brushMode === 'fill') {
           this.applyFloodFillAt(tile.x, tile.y);
+        } else if (this.brushMode === 'brush') {
+          this.tileMap.saveState();
+          this.applyBrushAt(world.x, world.y);
         }
       }
     });
@@ -910,8 +1949,10 @@ class EditorApp {
       const curTileEl = document.getElementById('stat-cursor-tile');
       if (curTileEl) curTileEl.textContent = `Cella: [${tile.x}, ${tile.y}]`;
 
-      if (this.isMouseDown && this.brushMode === 'single') {
+      if (this.isMouseDown && (this.activeTool === 'foliage' || this.brushMode === 'single')) {
         this.applyToolAt(world.x, world.y, false);
+      } else if (this.isMouseDown && this.brushMode === 'brush') {
+        this.applyBrushAt(world.x, world.y);
       }
     });
 
@@ -962,6 +2003,27 @@ class EditorApp {
     }
 
     switch (this.activeTool) {
+      case 'foliage': {
+        this.foliageBrush.config.radius = this.foliageBrushRadius;
+        this.foliageBrush.config.density = this.foliageDensity;
+        this.foliageBrush.config.minDistance = this.foliageMinDistance;
+        this.foliageBrush.config.variantId = this.selectedFoliageVariantId;
+        this.foliageBrush.config.scaleMin = Math.max(0.4, this.foliageScale * (1 - this.foliageScaleJitter));
+        this.foliageBrush.config.scaleMax = this.foliageScale * (1 + this.foliageScaleJitter);
+
+        const newTufts = this.foliageBrush.paint(
+          worldX / s,
+          worldY / s,
+          (tx, ty) => this.tileMap.isInBounds(tx, ty),
+          isInitialClick
+        );
+
+        for (const tuft of newTufts) {
+          this.tileMap.foliage.push(tuft);
+        }
+        break;
+      }
+
       case 'terrain':
         this.tileMap.setTerrain(tile.x, tile.y, this.selectedTerrain);
         break;
@@ -1048,6 +2110,10 @@ class EditorApp {
 
       case 'erase':
         // Selective erasure controlled by eraseFilters:
+        if (this.eraseFilters.foliage) {
+          this.tileMap.removeFoliageInRadius(worldX / s, worldY / s, 1.2);
+        }
+
         if (this.eraseFilters.props) {
           this.tileMap.removePropAt(worldX / s, worldY / s);
         }
@@ -1072,6 +2138,88 @@ class EditorApp {
           this.tileMap.setTerrain(tile.x, tile.y, TileType.EMPTY);
         }
         break;
+
+      case 'fog':
+        this.tileMap.setFog(tile.x, tile.y, this.fogMode === 'hide');
+        break;
+    }
+  }
+
+  /**
+   * Landscape-style circular brush painting (like Unreal Engine's Landscape Brush).
+   *
+   * For each tile whose center falls within brushRadius tiles of (worldX, worldY):
+   *   - Computes a normalized distance [0..1] within the brush circle
+   *   - Applies a smooth falloff: tiles inside hardness zone always painted,
+   *     tiles in the outer soft zone painted with probability = falloff * opacity
+   *   - This creates a natural, irregular edge instead of a hard circle
+   */
+  private applyBrushAt(worldX: number, worldY: number): void {
+    const s = this.tileMap.pixelsPerGrid;
+    const r = this.brushRadius;
+    const hardness = this.brushHardness;
+    const opacity = this.brushOpacity;
+
+    const centerTileX = worldX / s;
+    const centerTileY = worldY / s;
+    const radiusTiles = Math.ceil(r);
+
+    const tileX = Math.floor(centerTileX);
+    const tileY = Math.floor(centerTileY);
+
+    for (let dy = -radiusTiles; dy <= radiusTiles; dy++) {
+      for (let dx = -radiusTiles; dx <= radiusTiles; dx++) {
+        const tx = tileX + dx;
+        const ty = tileY + dy;
+        if (!this.tileMap.isInBounds(tx, ty)) continue;
+
+        // Distance from brush center to tile center (in tiles)
+        const tileCX = tx + 0.5;
+        const tileCY = ty + 0.5;
+        const dist = Math.hypot(tileCX - centerTileX, tileCY - centerTileY);
+
+        if (dist > r) continue;
+
+        // Falloff function (matches UE landscape brush falloff behavior):
+        // 0..hardness zone → full strength
+        // hardness..1 zone → smoothstep fade to 0
+        const normalizedDist = dist / r;
+        let strength: number;
+        if (normalizedDist <= hardness) {
+          strength = opacity;
+        } else {
+          const t = (normalizedDist - hardness) / (1.0 - hardness + 0.0001);
+          // Smoothstep: 3t² - 2t³
+          const smooth = t * t * (3 - 2 * t);
+          strength = opacity * (1.0 - smooth);
+        }
+
+        // Probabilistic painting: scatter at falloff zone creates natural organic edges
+        if (Math.random() > strength) continue;
+
+        // Apply terrain or liquid
+        if (this.activeTool === 'terrain') {
+          this.tileMap.setTerrain(tx, ty, this.selectedTerrain);
+        } else if (this.activeTool === 'fog') {
+          this.tileMap.setFog(tx, ty, this.fogMode === 'hide');
+        } else if (this.activeTool === 'liquid') {
+          this.tileMap.setLiquid(tx, ty, this.selectedLiquid);
+          if (this.selectedLiquid === LiquidType.LAVA) {
+            const lx = tx + 0.5;
+            const ly = ty + 0.5;
+            if (!this.tileMap.lights.some(l => Math.hypot(l.x - lx, l.y - ly) < 0.6)) {
+              this.tileMap.addLight({
+                id: `lava_light_${tx}_${ty}`,
+                x: lx, y: ly,
+                radius: 2.2,
+                intensity: 0.45,
+                color: '#ea580c',
+                flicker: true
+              });
+            }
+          }
+        }
+      }
     }
   }
 
@@ -1087,6 +2235,8 @@ class EditorApp {
       for (let x = minX; x <= maxX; x++) {
         if (this.activeTool === 'terrain') {
           this.tileMap.setTerrain(x, y, this.selectedTerrain);
+        } else if (this.activeTool === 'fog') {
+          this.tileMap.setFog(x, y, this.fogMode === 'hide');
         } else if (this.activeTool === 'liquid') {
           this.tileMap.setLiquid(x, y, this.selectedLiquid);
           if (this.selectedLiquid === LiquidType.LAVA) {
@@ -1139,6 +2289,26 @@ class EditorApp {
   private applyFloodFillAt(x: number, y: number): void {
     if (this.activeTool === 'terrain') {
       this.tileMap.floodFillTerrain(x, y, this.selectedTerrain);
+    } else if (this.activeTool === 'fog') {
+      const target = this.tileMap.getFog(x, y);
+      const replacement = this.fogMode === 'hide';
+      if (target !== replacement) {
+        this.tileMap.saveState();
+        const queue: [number, number][] = [[x, y]];
+        const visited = new Uint8Array(this.tileMap.width * this.tileMap.height);
+        while (queue.length > 0) {
+          const [cx, cy] = queue.pop()!;
+          const idx = this.tileMap.getIndex(cx, cy);
+          if (!this.tileMap.isInBounds(cx, cy) || visited[idx]) continue;
+          visited[idx] = 1;
+          if (this.tileMap.getFog(cx, cy) !== target) continue;
+          this.tileMap.setFog(cx, cy, replacement);
+          if (cx > 0) queue.push([cx - 1, cy]);
+          if (cx < this.tileMap.width - 1) queue.push([cx + 1, cy]);
+          if (cy > 0) queue.push([cx, cy - 1]);
+          if (cy < this.tileMap.height - 1) queue.push([cx, cy + 1]);
+        }
+      }
     } else if (this.activeTool === 'liquid') {
       this.tileMap.floodFillLiquid(x, y, this.selectedLiquid);
       if (this.selectedLiquid === LiquidType.LAVA) {
@@ -1304,6 +2474,37 @@ class EditorApp {
 
     // Hearth fire
     this.tileMap.addLight({ id: 'hearth', x: 14.5, y: 5.5, radius: 7.0, intensity: 0.95, color: '#f97316', flicker: true });
+
+    // Outside grass foliage & wildflowers
+    for (let i = 0; i < 25; i++) {
+      const rx = 4.5 + Math.random() * 20;
+      const ry = Math.random() < 0.5 ? 0.8 + Math.random() * 2.5 : 16.8 + Math.random() * 2.5;
+      const variant = i % 3 === 0 ? 2 : i % 4 === 0 ? 4 : 0;
+      this.tileMap.addFoliage({
+        id: `t_fol_${i}`,
+        type: variant === 2 ? 'grass_flowers' : variant === 4 ? 'clover_patch' : 'grass_tuft_lush',
+        variantId: variant,
+        x: rx,
+        y: ry,
+        scale: 0.85 + Math.random() * 0.4,
+        rotation: Math.random() * Math.PI * 2,
+        phase: Math.random() * Math.PI * 2
+      });
+    }
+
+    // River bank reeds
+    for (let y = 1; y < h - 1; y += 2) {
+      this.tileMap.addFoliage({
+        id: `t_reed_${y}`,
+        type: 'reeds',
+        variantId: 5,
+        x: 3.8 + (Math.random() * 0.5),
+        y: y + Math.random() * 0.6,
+        scale: 1.0 + Math.random() * 0.3,
+        rotation: Math.random() * Math.PI * 2,
+        phase: Math.random() * Math.PI * 2
+      });
+    }
 
     this.renderer.centerOnMap(this.tileMap);
     this.updateStatusTelemetry();

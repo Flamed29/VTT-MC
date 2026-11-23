@@ -109,8 +109,20 @@ export interface AssetDefinition {
   };
 }
 
-export type ToolType = 'pan' | 'terrain' | 'liquid' | 'prop' | 'wall' | 'door' | 'light' | 'erase';
-export type BrushMode = 'single' | 'rect' | 'fill';
+export type FoliageType =
+  | 'grass_tuft_lush'     // Ciuffi / fasci d'erba verde brillante
+  | 'grass_tuft_dry'      // Fasci d'erba alta secca dorata
+  | 'grass_flowers'       // Erba fiorita con margherite e papaveri
+  | 'ferns'               // Felci di bosco a raggiera
+  | 'clover_patch'        // Trifogli
+  | 'reeds'               // Canneto e giunchi d'acqua
+  | 'biolum_sprouts'      // Germogli bioluminescenti
+  | 'autumn_leaves';      // Foglie autunnali cadute
+
+export type { FoliageInstance, FoliageLayerJSON } from './foliage/FoliageModel';
+
+export type ToolType = 'pan' | 'terrain' | 'liquid' | 'foliage' | 'prop' | 'wall' | 'door' | 'light' | 'erase' | 'fog';
+export type BrushMode = 'single' | 'rect' | 'fill' | 'brush';
 
 export interface Camera {
   x: number;       // camera center/offset in world px
@@ -123,6 +135,39 @@ export interface MapMetadata {
   width: number;
   height: number;
   pixelsPerGrid: number;
+}
+
+// Full Map Serialization Format for Save/Load and Library History
+export interface TileMapJSON {
+  version: number;
+  name?: string;
+  width: number;
+  height: number;
+  pixelsPerGrid: number;
+  terrain: number[];
+  liquid: number[];
+  walls: number[];
+  wallTypes: number[];
+  fogOfWar: number[];
+  doors: DoorData[];
+  lights: LightSource[];
+  props: PlacedProp[];
+  foliage: FoliageInstance[];
+  windDirection: [number, number];
+  windStrength: number;
+}
+
+// Saved Map Entry in the Map Library / Storico
+export interface SavedMapEntry {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  width: number;
+  height: number;
+  pixelsPerGrid: number;
+  thumbnailUrl?: string;
+  data: TileMapJSON;
 }
 
 // Universal VTT Specification (.dd2vtt / .uvtt)

@@ -1,6 +1,7 @@
 import { TileMap } from '../core/TileMap';
 import { TextureAtlas } from '../rendering/TextureAtlas';
 import { LiquidRenderer } from '../rendering/LiquidRenderer';
+import { FoliageRenderer } from '../rendering/FoliageRenderer';
 import { AssetManager } from '../core/AssetManager';
 import {
   UniversalVTTFormat,
@@ -15,7 +16,8 @@ import {
   DoorState,
   DoorType,
   TileType,
-  LiquidType
+  LiquidType,
+  FoliageType
 } from '../types';
 
 export class VttExporter {
@@ -138,6 +140,23 @@ export class VttExporter {
       ctx.fillRect(-drawW * 0.5, -drawH * 0.5, drawW, drawH);
       ctx.strokeRect(-drawW * 0.5, -drawH * 0.5, drawW, drawH);
 
+      ctx.restore();
+    }
+
+    // 4.5. Foliage Overlay Layer
+    const foliageRenderer = new FoliageRenderer();
+    const variantKeys: FoliageType[] = [
+      'grass_tuft_lush', 'grass_tuft_dry', 'grass_flowers', 'ferns',
+      'clover_patch', 'reeds', 'biolum_sprouts', 'autumn_leaves'
+    ];
+    for (const tuft of tileMap.foliage) {
+      const px = tuft.x * s;
+      const py = tuft.y * s;
+      ctx.save();
+      ctx.translate(px, py);
+      if (tuft.rotation !== 0) ctx.rotate(tuft.rotation);
+      const typeKey = (tuft.type as FoliageType) || variantKeys[tuft.variantId] || 'grass_tuft_lush';
+      foliageRenderer.renderTuft(ctx, typeKey, 0, tuft.phase || 0, tuft.scale * (s / 100), false);
       ctx.restore();
     }
 

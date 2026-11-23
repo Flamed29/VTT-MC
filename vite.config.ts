@@ -5,5 +5,8 @@ export default defineConfig({
     port: 5173,
     host: true,
     open: true // Apre automaticamente il browser all'avvio
+  },
+  build: {
+    chunkSizeWarningLimit: 1200
   }
 });

@@ -924,3 +924,322 @@ body.dark-theme {
   background: var(--bg-input);
   border-top: 1px solid var(--border);
 }
+
+/* ══════════════════════════════════════════════════════════════
+   POP-UP MODALE PRESENTAZIONE
+   ══════════════════════════════════════════════════════════════ */
+
+.btn-presentation {
+  background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%);
+  border: 1px solid #8b5cf6;
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.35);
+  transition: all 0.2s ease;
+}
+
+.btn-presentation:hover {
+  background: linear-gradient(135deg, #6d28d9 0%, #4338ca 100%);
+  border-color: #a78bfa;
+  box-shadow: 0 4px 14px rgba(124, 58, 237, 0.55);
+  transform: translateY(-1px);
+}
+
+/* Modal Card Presentation */
+.modal-card-presentation {
+  width: 92vw;
+  max-width: 1300px;
+  height: 86vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8), 0 0 40px rgba(139, 92, 246, 0.15);
+  overflow: hidden;
+  transition: box-shadow 0.2s ease, border-radius 0.2s ease;
+  position: relative;
+}
+
+.modal-card-presentation.is-dragging {
+  box-shadow: 0 35px 90px rgba(0, 0, 0, 0.95), 0 0 60px rgba(139, 92, 246, 0.4);
+}
+
+.modal-card-presentation .modal-header {
+  cursor: grab;
+  user-select: none;
+}
+
+.modal-card-presentation .modal-header:active {
+  cursor: grabbing;
+}
+
+.modal-card-presentation.is-fullscreen .modal-header {
+  cursor: default;
+}
+
+/* Fullscreen toggle state for the modal card */
+.modal-card-presentation.is-fullscreen {
+  width: 100vw;
+  max-width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  border: none;
+}
+
+.modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.modal-title-group h3 {
+  font-family: var(--font-title);
+  font-size: 1.1rem;
+  color: #fff;
+  line-height: 1.2;
+}
+
+.modal-subtext {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.modal-body-presentation {
+  flex: 1;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 300px;
+  background: #090b0e;
+  overflow: hidden;
+  display: flex;
+}
+
+#presentation-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+}
+
+#presentation-canvas:active {
+  cursor: grabbing;
+}
+
+.modal-footer-presentation {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.65rem 1.15rem;
+  background: var(--bg-input);
+  border-top: 1px solid var(--border);
+}
+
+.presentation-footer-hints {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.presentation-footer-hints kbd {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: inherit;
+  font-size: 0.7rem;
+  color: var(--text-main);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   MAP LIBRARY & STORICO
+   ══════════════════════════════════════════════════════════════ */
+
+.modal-card-library {
+  width: 90vw;
+  max-width: 1100px;
+  height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8), 0 0 35px rgba(245, 158, 11, 0.1);
+  overflow: hidden;
+}
+
+.modal-body-library {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem 1.25rem;
+  overflow: hidden;
+  gap: 0.85rem;
+}
+
+.library-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.library-toolbar input {
+  flex: 1;
+  max-width: 400px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  padding: 0.5rem 0.85rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  outline: none;
+}
+
+.library-toolbar input:focus {
+  border-color: var(--primary);
+}
+
+.library-count {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.library-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+  overflow-y: auto;
+  padding-right: 0.35rem;
+}
+
+.library-card-item {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.library-card-item:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+
+.library-thumb-wrap {
+  width: 100%;
+  height: 140px;
+  background: #090b0e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+
+.library-thumb-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.library-thumb-placeholder {
+  font-size: 2.5rem;
+  opacity: 0.4;
+}
+
+.library-card-info {
+  padding: 0.75rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex: 1;
+}
+
+.library-card-title {
+  font-family: var(--font-title);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.library-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.library-card-actions {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.5rem 0.85rem 0.75rem 0.85rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.library-card-actions .btn {
+  flex: 1;
+  font-size: 0.75rem;
+  padding: 0.35rem 0.5rem;
+  justify-content: center;
+}
+
+.library-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1rem;
+  color: var(--text-muted);
+  gap: 0.75rem;
+}
+
+.library-empty-icon {
+  font-size: 3rem;
+  opacity: 0.5;
+}
+
+.modal-footer-library {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1.25rem;
+  background: var(--bg-input);
+  border-top: 1px solid var(--border);
+}
+
+.library-hint {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+/* Fog of War Palette Mode Switcher */
+.fog-mode-switch {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.85rem;
+}
+
+.fog-mode-switch button {
+  flex: 1;
+  padding: 0.55rem;
+  font-size: 0.8rem;
+}

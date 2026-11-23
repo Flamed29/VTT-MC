@@ -1,6 +1,8 @@
 import { TileMap } from '../core/TileMap';
 import { TextureAtlas } from './TextureAtlas';
 import { LiquidRenderer } from './LiquidRenderer';
+import { FoliageRenderer } from './FoliageRenderer';
+import { Canvas2DFoliageRenderer } from '../foliage/Canvas2DFoliageRenderer';
 import { AssetManager } from '../core/AssetManager';
 import {
   Camera,
@@ -30,6 +32,18 @@ export interface RenderOptions {
   propRotation?: number;
   propWidth?: number;
   propHeight?: number;
+  // Brush tool options
+  brushMode?: string;
+  brushRadius?: number;    // in tiles
+  brushHardness?: number;  // 0.0 (soft) to 1.0 (hard)
+  brushOpacity?: number;   // 0.0 to 1.0
+  // Foliage brush options
+  foliageBrushRadius?: number;
+  foliageType?: string;
+  // Fog of War options
+  showFog?: boolean;
+  isPlayerView?: boolean;
+  fogMode?: 'hide' | 'reveal';
 }
 
 export class ViewportRenderer {
@@ -37,6 +51,8 @@ export class ViewportRenderer {
   public ctx: CanvasRenderingContext2D;
   public atlas: TextureAtlas;
   public liquidRenderer: LiquidRenderer;
+  public foliageRenderer: FoliageRenderer;
+  public canvas2dFoliage: Canvas2DFoliageRenderer;
   public assetManager: AssetManager;
 
   public camera: Camera = { x: 0, y: 0, zoom: 1.0 };
@@ -51,6 +67,8 @@ export class ViewportRenderer {
     this.ctx = canvas.getContext('2d', { alpha: false })!;
     this.atlas = new TextureAtlas();
     this.liquidRenderer = new LiquidRenderer();
+    this.foliageRenderer = new FoliageRenderer();
+    this.canvas2dFoliage = new Canvas2DFoliageRenderer();
     this.assetManager = assetManager || new AssetManager();
 
     this.resizeCanvasToContainer();
@@ -183,12 +201,20 @@ export class ViewportRenderer {
     // 4. LAYER: DOORS
     this.renderDoors(ctx, tileMap, tileSize);
 
+    // 4.5. LAYER: FOLIAGE & GRASS OVERLAY (Batch WebGL GPU Instancing)
+    this.renderFoliage(ctx, tileMap, tileSize, timeSec, options.animateWater, viewW, viewH);
+
     // 5. LAYER: PROPS / OGGETTI
     this.renderProps(ctx, tileMap, tileSize);
 
     // 6. LAYER: DYNAMIC LIGHTS & GLOWING LIQUIDS
     if (options.showLighting) {
       this.renderLighting(ctx, tileMap, tileSize, timeSec);
+    }
+
+    // 6.5. LAYER: FOG OF WAR (Nebbia di Guerra: 100% nera per i giocatori, semitrasparente per il Master)
+    if (options.isPlayerView || options.showFog !== false) {
+      this.renderFogOfWar(ctx, tileMap, startCol, endCol, startRow, endRow, tileSize, !!options.isPlayerView);
     }
 
     // 7. LAYER: GRID OVERLAY
@@ -200,6 +226,33 @@ export class ViewportRenderer {
     this.renderHoverAndSelection(ctx, tileMap, options, tileSize);
 
     ctx.restore();
+  }
+
+  // --- Foliage / Grass Overlay Layer (Canvas 2D — per-stem bezier physics) ---
+  private renderFoliage(
+    ctx: CanvasRenderingContext2D,
+    tileMap: TileMap,
+    s: number,
+    timeSec: number,
+    animate: boolean,
+    viewW: number,
+    viewH: number
+  ): void {
+    if (tileMap.foliage.length === 0) return;
+
+    this.canvas2dFoliage.render(
+      ctx,
+      tileMap.foliage,
+      s,
+      timeSec,
+      tileMap.windDirection,
+      animate ? tileMap.windStrength : 0.0,
+      this.camera.x,
+      this.camera.y,
+      this.camera.zoom,
+      viewW,
+      viewH
+    );
   }
 
   // --- Props Layer ---
@@ -411,6 +464,48 @@ export class ViewportRenderer {
     ctx.restore();
   }
 
+  // --- Fog of War Layer ---
+  private renderFogOfWar(
+    ctx: CanvasRenderingContext2D,
+    tileMap: TileMap,
+    startCol: number,
+    endCol: number,
+    startRow: number,
+    endRow: number,
+    s: number,
+    isPlayerView: boolean
+  ): void {
+    if (!tileMap.fogOfWar) return;
+
+    ctx.save();
+    for (let y = startRow; y < endRow; y++) {
+      for (let x = startCol; x < endCol; x++) {
+        if (tileMap.getFog(x, y)) {
+          const dx = x * s;
+          const dy = y * s;
+
+          if (isPlayerView) {
+            // Player presentation / dual screen: complete pitch black concealment
+            ctx.fillStyle = '#060709';
+            ctx.fillRect(dx, dy, s, s);
+          } else {
+            // Editor / Master view: semi-transparent dark shroud with subtle hatch
+            ctx.fillStyle = 'rgba(8, 11, 18, 0.76)';
+            ctx.fillRect(dx, dy, s, s);
+
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(dx, dy);
+            ctx.lineTo(dx + s, dy + s);
+            ctx.stroke();
+          }
+        }
+      }
+    }
+    ctx.restore();
+  }
+
   private renderGrid(
     ctx: CanvasRenderingContext2D,
     tileMap: TileMap,
@@ -446,6 +541,152 @@ export class ViewportRenderer {
     options: RenderOptions,
     s: number
   ): void {
+    // =========================================================
+    // BRUSH PREVIEW — circular landscape-style brush
+    // =========================================================
+    if (
+      options.brushMode === 'brush' &&
+      options.hoverWorld &&
+      (options.activeTool === 'terrain' || options.activeTool === 'liquid')
+    ) {
+      const r = (options.brushRadius ?? 2) * s;
+      const hardness = options.brushHardness ?? 0.6;
+      const opacity = options.brushOpacity ?? 0.8;
+      const cx = options.hoverWorld.x;
+      const cy = options.hoverWorld.y;
+
+      ctx.save();
+
+      // 1. Soft outer glow gradient (like UE landscape brush falloff)
+      const innerRadius = r * hardness;
+      const grad = ctx.createRadialGradient(cx, cy, innerRadius * 0.5, cx, cy, r);
+      grad.addColorStop(0,   `rgba(255, 220, 50, ${opacity * 0.25})`);
+      grad.addColorStop(0.5, `rgba(255, 180, 20, ${opacity * 0.12})`);
+      grad.addColorStop(1,   'rgba(255, 150, 0, 0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 2. Hard inner circle (full-strength zone)
+      ctx.fillStyle = `rgba(255, 230, 80, ${opacity * 0.1})`;
+      ctx.beginPath();
+      ctx.arc(cx, cy, innerRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 3. Outer dashed circle border
+      ctx.strokeStyle = `rgba(255, 210, 60, ${opacity})`;
+      ctx.lineWidth = 1.5 / (this.camera.zoom);
+      ctx.setLineDash([6 / this.camera.zoom, 4 / this.camera.zoom]);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // 4. Inner solid circle border
+      ctx.strokeStyle = `rgba(255, 255, 255, ${opacity * 0.5})`;
+      ctx.lineWidth = 1 / this.camera.zoom;
+      ctx.beginPath();
+      ctx.arc(cx, cy, innerRadius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // 5. Highlight the tiles that will be painted (within radius)
+      const brushR = options.brushRadius ?? 2;
+      const tileX = Math.floor(cx / s);
+      const tileY = Math.floor(cy / s);
+      const radiusTiles = Math.ceil(brushR);
+
+      for (let dy = -radiusTiles; dy <= radiusTiles; dy++) {
+        for (let dx = -radiusTiles; dx <= radiusTiles; dx++) {
+          const tx = tileX + dx;
+          const ty = tileY + dy;
+          if (!tileMap.isInBounds(tx, ty)) continue;
+
+          const tileCenterX = (tx + 0.5) * s;
+          const tileCenterY = (ty + 0.5) * s;
+          const dist = Math.hypot(tileCenterX - cx, tileCenterY - cy) / s;
+          if (dist > brushR) continue;
+
+          // Falloff: 1.0 at center, fades at edge based on hardness
+          const normalizedDist = dist / brushR;
+          const falloff = normalizedDist < hardness
+            ? 1.0
+            : 1.0 - (normalizedDist - hardness) / (1.0 - hardness + 0.001);
+          const tileAlpha = falloff * opacity * 0.3;
+
+          ctx.fillStyle = `rgba(255, 220, 60, ${tileAlpha})`;
+          ctx.fillRect(tx * s + 0.5, ty * s + 0.5, s - 1, s - 1);
+        }
+      }
+
+      // 6. Center crosshair
+      const ch = 6 / this.camera.zoom;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.lineWidth = 1.5 / this.camera.zoom;
+      ctx.beginPath();
+      ctx.moveTo(cx - ch, cy); ctx.lineTo(cx + ch, cy);
+      ctx.moveTo(cx, cy - ch); ctx.lineTo(cx, cy + ch);
+      ctx.stroke();
+
+      ctx.restore();
+      return;
+    }
+
+    // =========================================================
+    // FOLIAGE BRUSH PREVIEW (Unreal Engine Foliage Scatter Tool)
+    // =========================================================
+    if (options.activeTool === 'foliage' && options.hoverWorld) {
+      const r = (options.foliageBrushRadius ?? 1.5) * s;
+      const cx = options.hoverWorld.x;
+      const cy = options.hoverWorld.y;
+
+      ctx.save();
+
+      // Soft green radial background
+      const grad = ctx.createRadialGradient(cx, cy, r * 0.2, cx, cy, r);
+      grad.addColorStop(0, 'rgba(74, 222, 128, 0.25)');
+      grad.addColorStop(0.7, 'rgba(34, 197, 94, 0.12)');
+      grad.addColorStop(1, 'rgba(20, 83, 45, 0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Green dashed outer circle
+      ctx.strokeStyle = '#4ade80';
+      ctx.lineWidth = 2 / this.camera.zoom;
+      ctx.setLineDash([5 / this.camera.zoom, 3 / this.camera.zoom]);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Little preview tuft at cursor center
+      ctx.save();
+      ctx.translate(cx, cy);
+      this.foliageRenderer.renderTuft(
+        ctx,
+        (options.foliageType as any) || 'grass_tuft_lush',
+        0,
+        0,
+        1.1 * (s / 100),
+        false
+      );
+      ctx.restore();
+
+      // Crosshair
+      const ch = 5 / this.camera.zoom;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5 / this.camera.zoom;
+      ctx.beginPath();
+      ctx.moveTo(cx - ch, cy); ctx.lineTo(cx + ch, cy);
+      ctx.moveTo(cx, cy - ch); ctx.lineTo(cx, cy + ch);
+      ctx.stroke();
+
+      ctx.restore();
+      return;
+    }
+
     // Prop Placement Ghosting Preview
     if (options.activeTool === 'prop' && options.activePropId && options.hoverWorld) {
       const asset = this.assetManager.getAssetById(options.activePropId);

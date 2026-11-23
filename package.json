@@ -9,7 +9,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "lucide": "^1.16.0"
+    "@types/rbush": "^4.0.0",
+    "@types/three": "^0.187.0",
+    "lucide": "^1.16.0",
+    "rbush": "^4.0.1",
+    "three": "^0.187.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

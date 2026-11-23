@@ -43,6 +43,17 @@
         <div class="divider"></div>
 
         <div class="control-group">
+          <button id="btn-open-map-library" class="btn btn-secondary" title="Apri Storico / Contenitore delle mappe salvate">
+            <span class="icon">📚</span> Storico Mappe
+          </button>
+          <button id="btn-save-map-library" class="btn btn-primary" title="Salva la mappa corrente nello storico">
+            <span class="icon">💾</span> Salva
+          </button>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="control-group">
           <button id="btn-undo" class="btn btn-icon" title="Annulla (Ctrl+Z)">↩</button>
           <button id="btn-redo" class="btn btn-icon" title="Ripristina (Ctrl+Y)">↪</button>
           <button id="btn-clear" class="btn btn-icon btn-danger" title="Pulisci Mappa">🗑️</button>
@@ -56,6 +67,9 @@
           </button>
           <button id="btn-export-png" class="btn btn-secondary" title="Esporta immagine PNG alta risoluzione">
             <span class="icon">🖼️</span> Esporta PNG
+          </button>
+          <button id="btn-presentation" class="btn btn-presentation" title="Modalità Presentazione — mostra solo la mappa">
+            <span class="icon">🎬</span> Presenta
           </button>
         </div>
       </div>
@@ -78,6 +92,10 @@
           <button class="tool-btn" data-tool="liquid" title="Liquidi (Acqua, Lava, Acido, Sangue)">
             <span class="tool-icon">🌊</span>
             <span class="tool-label">Liquidi</span>
+          </button>
+          <button class="tool-btn" data-tool="foliage" title="Foliage & Fasci d'Erba (Pennello stile Unreal Engine per erba alta, fiori, felci)">
+            <span class="tool-icon">🌿</span>
+            <span class="tool-label">Foliage</span>
           </button>
           <button class="tool-btn" data-tool="prop" title="Oggetti & Props (Tavoli, Casse, Barili, Arredi)">
             <span class="tool-icon">📦</span>
@@ -102,6 +120,10 @@
             </button>
             <button class="tool-btn-settings" id="btn-eraser-settings" title="Filtri e proprietà della gomma (Includi/Escludi elementi)">⚙️</button>
           </div>
+          <button class="tool-btn" data-tool="fog" title="Nebbia di Guerra (Nascondi o rivela aree ai giocatori)">
+            <span class="tool-icon">🌫️</span>
+            <span class="tool-label">Nebbia</span>
+          </button>
         </div>
 
         <!-- Popover rapido impostazioni gomma -->
@@ -111,6 +133,7 @@
             <button id="btn-close-popover" class="btn-xs-close">&times;</button>
           </div>
           <div class="popover-checks">
+            <label class="popover-check"><input type="checkbox" id="pop-ef-foliage" checked /> 🌿 Erba / Foliage</label>
             <label class="popover-check"><input type="checkbox" id="pop-ef-props" checked /> Oggetti / Props</label>
             <label class="popover-check"><input type="checkbox" id="pop-ef-lights" checked /> Luci</label>
             <label class="popover-check"><input type="checkbox" id="pop-ef-liquid" checked /> Liquidi</label>
@@ -125,6 +148,7 @@
           <button class="brush-mode-btn active" data-mode="single" title="Punto singolo (1x1)">1x1</button>
           <button class="brush-mode-btn" data-mode="rect" title="Rettangolo / Riempimento">Rett.</button>
           <button class="brush-mode-btn" data-mode="fill" title="Secchiello / Flood Fill">Secchio</button>
+          <button class="brush-mode-btn" data-mode="brush" title="Brush circolare (stile Landscape Unreal Engine) — mantieni premuto e trascina">🖌️ Brush</button>
         </div>
 
         <div class="tool-section-title" style="margin-top: 1rem;">Visualizzazione</div>
@@ -145,6 +169,15 @@
           <label class="checkbox-label">
             <input type="checkbox" id="chk-lighting" checked /> Anteprima Luci
           </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="chk-fog" checked /> Nebbia di Guerra
+          </label>
+          <button id="btn-sidebar-presentation" class="btn btn-presentation" style="width: 100%; margin-top: 0.75rem; justify-content: center;" title="Apri Pop-up Modalità Presentazione">
+            <span class="icon">🎬</span> Presenta Mappa
+          </button>
+          <button id="btn-sidebar-dual-screen" class="btn btn-secondary" style="width: 100%; margin-top: 0.35rem; justify-content: center; font-size: 0.78rem;" title="Apri una finestra separata da posizionare sul secondo schermo/proiettore">
+            <span class="icon">🖥️</span> Finestra 2° Schermo
+          </button>
         </div>
       </aside>
 
@@ -286,5 +319,87 @@
   </div>
 
   <script type="module" src="./src/main.ts"></script>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       POP-UP MODALE PRESENTAZIONE MAPPA (Solo mappa dal vivo, pulita)
+       ══════════════════════════════════════════════════════════════ -->
+  <div class="modal-backdrop" id="presentation-modal" style="display: none;">
+    <div class="modal-card modal-card-presentation" id="presentation-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span style="font-size: 1.3rem;">🎬</span>
+          <div>
+            <h3>Presentazione Mappa</h3>
+            <span class="modal-subtext">Trasmissione pulita dal vivo • Nessun menu o strumento</span>
+          </div>
+        </div>
+        <div class="modal-header-actions">
+          <button id="btn-pres-popout"   class="btn btn-primary btn-xs" title="Estrai in finestra separata da trascinare sul secondo monitor"><span class="icon">🖥️</span> 2° Schermo</button>
+          <button id="btn-pres-zoom-out" class="btn btn-secondary btn-xs" title="Zoom Out (－)">－</button>
+          <button id="btn-pres-zoom-in"  class="btn btn-secondary btn-xs" title="Zoom In (＋)">＋</button>
+          <button id="btn-pres-fit"      class="btn btn-secondary btn-xs" title="Centra e adatta mappa">⊞ Centra</button>
+          <button id="btn-pres-fullscreen" class="btn btn-secondary btn-xs" title="Espandi / Riduci schermo intero">⛶ Schermo Intero</button>
+          <button class="btn-modal-close" id="btn-pres-close" title="Chiudi (Esc)">&times;</button>
+        </div>
+      </div>
+
+      <div class="modal-body-presentation" id="presentation-body">
+        <canvas id="presentation-canvas"></canvas>
+      </div>
+
+      <div class="modal-footer modal-footer-presentation">
+        <div class="presentation-footer-hints">
+          <span>🖐️ Trascina per navigare</span>
+          <span>•</span>
+          <span>🔍 Rotellina per zoomare</span>
+          <span>•</span>
+          <span>Premi <kbd>Esc</kbd> per chiudere</span>
+        </div>
+        <button id="btn-pres-close-footer" class="btn btn-secondary btn-sm">Chiudi</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       POP-UP MODALE STORICO E LIBRERIA MAPPE
+       ══════════════════════════════════════════════════════════════ -->
+  <div class="modal-backdrop" id="modal-map-library" style="display: none;">
+    <div class="modal-card modal-card-library" id="library-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span style="font-size: 1.3rem;">📚</span>
+          <div>
+            <h3>Storico Mappe</h3>
+            <span class="modal-subtext">Contenitore e archivio delle tue mappe RPG</span>
+          </div>
+        </div>
+        <div class="modal-header-actions">
+          <button id="btn-library-new-map" class="btn btn-primary btn-xs" title="Crea nuova mappa vuota">➕ Nuova Mappa</button>
+          <button id="btn-library-save-current" class="btn btn-secondary btn-xs" title="Salva la mappa attiva nello storico">💾 Salva Corrente</button>
+          <button id="btn-library-import-json" class="btn btn-secondary btn-xs" title="Carica file .json da computer">📥 Importa File</button>
+          <input type="file" id="input-import-map-file" accept=".json" style="display: none;" />
+          <button class="btn-modal-close" id="btn-close-library" title="Chiudi (Esc)">&times;</button>
+        </div>
+      </div>
+
+      <div class="modal-body modal-body-library">
+        <!-- Search and count bar -->
+        <div class="library-toolbar">
+          <input type="text" id="library-search-input" placeholder="🔍 Cerca per nome..." />
+          <span id="library-count-text" class="library-count">0 mappe salvate</span>
+        </div>
+
+        <!-- Grid of saved map cards -->
+        <div class="library-grid" id="library-grid">
+          <!-- Populated dynamically via JS -->
+        </div>
+      </div>
+
+      <div class="modal-footer modal-footer-library">
+        <span class="library-hint">Le mappe sono conservate in modo persistente. Puoi esportarle come backup in qualsiasi momento.</span>
+        <button id="btn-close-library-footer" class="btn btn-secondary btn-sm">Chiudi</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
