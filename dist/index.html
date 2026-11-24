@@ -7,8 +7,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <script type="module" crossorigin src="/assets/index-C7xoGXEr.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-BjxW6jIR.css">
+  <script type="module" crossorigin src="/assets/index-6Rzdu7g2.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-CjnElE7z.css">
 </head>
 <body class="dark-theme">
   <div id="app">
@@ -39,6 +39,17 @@
             <option value="140">140 px (Foundry 140 / HQ)</option>
             <option value="200">200 px (Ultra HQ)</option>
           </select>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="control-group">
+          <button id="btn-open-map-library" class="btn btn-secondary" title="Apri Storico / Contenitore delle mappe salvate">
+            <span class="icon">📚</span> Storico Mappe
+          </button>
+          <button id="btn-save-map-library" class="btn btn-primary" title="Salva la mappa corrente nello storico">
+            <span class="icon">💾</span> Salva
+          </button>
         </div>
 
         <div class="divider"></div>
@@ -110,6 +121,21 @@
             </button>
             <button class="tool-btn-settings" id="btn-eraser-settings" title="Filtri e proprietà della gomma (Includi/Escludi elementi)">⚙️</button>
           </div>
+          <button class="tool-btn" data-tool="fog" title="Nebbia di Guerra (Nascondi o rivela aree ai giocatori)">
+            <span class="tool-icon">🌫️</span>
+            <span class="tool-label">Nebbia</span>
+          </button>
+          <button class="tool-btn" data-tool="interact" title="Interazione (Apri/Chiudi porte e oggetti interattivi)">
+            <span class="tool-icon">👆</span>
+            <span class="tool-label">Interagisci</span>
+          </button>
+          <div class="tool-btn-wrapper">
+            <button class="tool-btn" data-tool="draw" title="Strumenti di Disegno (Annotazioni sul layer di sessione)">
+              <span class="tool-icon">✏️</span>
+              <span class="tool-label">Disegno</span>
+            </button>
+            <button class="tool-btn-settings" id="btn-drawing-tools-window" title="Apri finestra strumenti di disegno">⚙️</button>
+          </div>
         </div>
 
         <!-- Popover rapido impostazioni gomma -->
@@ -126,6 +152,7 @@
             <label class="popover-check"><input type="checkbox" id="pop-ef-walls" checked /> Muri</label>
             <label class="popover-check"><input type="checkbox" id="pop-ef-doors" checked /> Porte</label>
             <label class="popover-check"><input type="checkbox" id="pop-ef-terrain" /> Terreno</label>
+            <label class="popover-check"><input type="checkbox" id="pop-ef-drawing" checked /> ✏️ Disegni</label>
           </div>
         </div>
 
@@ -154,6 +181,9 @@
           </label>
           <label class="checkbox-label">
             <input type="checkbox" id="chk-lighting" checked /> Anteprima Luci
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="chk-fog" checked /> Nebbia di Guerra
           </label>
           <button id="btn-sidebar-presentation" class="btn btn-presentation" style="width: 100%; margin-top: 0.75rem; justify-content: center;" title="Apri Pop-up Modalità Presentazione">
             <span class="icon">🎬</span> Presenta Mappa
@@ -301,6 +331,133 @@
     </div>
   </div>
 
+  <!-- ══════════════════════════════════════════════════════════════
+       FINESTRA FLOTTANTE STRUMENTI DI DISEGNO
+       Finestra trascinabile separata, aperta tramite il pulsante ⚙️
+       accanto allo strumento Disegno nella toolbar sinistra.
+       ══════════════════════════════════════════════════════════════ -->
+  <div class="drawing-tools-window" id="drawing-tools-window" style="display: none;">
+    <div class="drawing-tools-header" id="drawing-tools-header">
+      <span class="drawing-tools-title">✏️ Strumenti di Disegno</span>
+      <div class="drawing-tools-header-actions">
+        <button id="btn-drawing-undo" class="btn btn-icon btn-xs" title="Annulla ultimo disegno (Ctrl+Z)">↩</button>
+        <button id="btn-drawing-redo" class="btn btn-icon btn-xs" title="Ripristina disegno (Ctrl+Y)">↪</button>
+        <button id="btn-drawing-clear-all" class="btn btn-xs btn-danger" title="Cancella tutti i disegni">🗑️</button>
+        <button id="btn-drawing-tools-close" class="btn-xs-close" title="Chiudi">&times;</button>
+      </div>
+    </div>
+
+    <div class="drawing-tools-body">
+
+      <!-- Selezione forma -->
+      <div class="drawing-section-title">Forma</div>
+      <div class="drawing-shapes-grid">
+        <button class="drawing-shape-btn active" data-shape="freehand" title="Disegno a mano libera">
+          <span class="shape-icon">✏️</span>
+          <span>Libero</span>
+        </button>
+        <button class="drawing-shape-btn" data-shape="line" title="Linea geometrica retta">
+          <span class="shape-icon">📏</span>
+          <span>Linea</span>
+        </button>
+        <button class="drawing-shape-btn" data-shape="rect" title="Quadrato geometrico">
+          <span class="shape-icon">⬜</span>
+          <span>Quadrato</span>
+        </button>
+        <button class="drawing-shape-btn" data-shape="rectangle" title="Rettangolo geometrico">
+          <span class="shape-icon">▭</span>
+          <span>Rettang.</span>
+        </button>
+        <button class="drawing-shape-btn" data-shape="circle" title="Cerchio geometrico">
+          <span class="shape-icon">⭕</span>
+          <span>Cerchio</span>
+        </button>
+        <button class="drawing-shape-btn" data-shape="triangle" title="Triangolo geometrico">
+          <span class="shape-icon">🔺</span>
+          <span>Triangolo</span>
+        </button>
+      </div>
+
+      <!-- Colore e spessore -->
+      <div class="drawing-section-title" style="margin-top:0.75rem;">Stile</div>
+      <div class="drawing-controls-grid">
+        <div class="drawing-ctrl-row">
+          <label>Colore:</label>
+          <input type="color" id="drawing-color" value="#ff4444" title="Colore del tratto" />
+        </div>
+        <div class="drawing-ctrl-row">
+          <label>Spessore:</label>
+          <div class="drawing-slider-row">
+            <input type="range" id="drawing-line-width" min="1" max="20" step="0.5" value="3" />
+            <strong id="val-drawing-line-width">3 px</strong>
+          </div>
+        </div>
+        <div class="drawing-ctrl-row">
+          <label>Opacità:</label>
+          <div class="drawing-slider-row">
+            <input type="range" id="drawing-opacity" min="0.1" max="1" step="0.05" value="1" />
+            <strong id="val-drawing-opacity">100%</strong>
+          </div>
+        </div>
+      </div>
+
+      <!-- Riempimento (solo forme chiuse) -->
+      <div class="drawing-ctrl-row" style="margin-top:0.3rem;">
+        <label class="checkbox-label" style="font-size:0.78rem;">
+          <input type="checkbox" id="drawing-filled" />
+          Riempi forma (solo chiuse)
+        </label>
+      </div>
+      <div class="drawing-ctrl-row" id="drawing-fill-color-row" style="margin-top:0.3rem; display:none;">
+        <label>Colore riempimento:</label>
+        <input type="color" id="drawing-fill-color" value="#ff4444" title="Colore riempimento" />
+        <div class="drawing-slider-row" style="margin-top:0.25rem;">
+          <input type="range" id="drawing-fill-opacity" min="0.05" max="1" step="0.05" value="0.2" />
+          <strong id="val-drawing-fill-opacity">20%</strong>
+        </div>
+      </div>
+
+      <!-- Snap -->
+      <div class="drawing-section-title" style="margin-top:0.75rem;">Punto di Ancoraggio</div>
+      <div class="drawing-snap-btns">
+        <button class="drawing-snap-btn active" data-snap="free" title="Nessun vincolo — posizione libera">
+          Senza vincoli
+        </button>
+        <button class="drawing-snap-btn" data-snap="tile_corner" title="Snap all'angolo della casella griglia">
+          Angolo cella
+        </button>
+        <button class="drawing-snap-btn" data-snap="tile_center" title="Snap al centro della casella griglia">
+          Centro cella
+        </button>
+      </div>
+
+      <!-- Persistenza -->
+      <div class="drawing-section-title" style="margin-top:0.75rem;">Comportamento</div>
+      <div class="drawing-persist-btns">
+        <button class="drawing-persist-btn active" data-persist="true" title="Il disegno rimane finché non viene cancellato manualmente">
+          💾 Mantieni
+        </button>
+        <button class="drawing-persist-btn" data-persist="false" title="Il disegno scompare al rilascio del mouse">
+          ⚡ Temporaneo
+        </button>
+      </div>
+
+      <!-- Colori rapidi -->
+      <div class="drawing-section-title" style="margin-top:0.75rem;">Colori Rapidi</div>
+      <div class="drawing-quick-colors">
+        <div class="drawing-quick-color" data-color="#ff4444" style="background:#ff4444;" title="Rosso"></div>
+        <div class="drawing-quick-color" data-color="#ff9900" style="background:#ff9900;" title="Arancione"></div>
+        <div class="drawing-quick-color" data-color="#ffdd00" style="background:#ffdd00;" title="Giallo"></div>
+        <div class="drawing-quick-color" data-color="#44ff44" style="background:#44ff44;" title="Verde"></div>
+        <div class="drawing-quick-color" data-color="#4499ff" style="background:#4499ff;" title="Blu"></div>
+        <div class="drawing-quick-color" data-color="#cc44ff" style="background:#cc44ff;" title="Viola"></div>
+        <div class="drawing-quick-color" data-color="#ffffff" style="background:#ffffff;" title="Bianco"></div>
+        <div class="drawing-quick-color" data-color="#888888" style="background:#888888;" title="Grigio"></div>
+      </div>
+
+    </div>
+  </div>
+
 
   <!-- ══════════════════════════════════════════════════════════════
        POP-UP MODALE PRESENTAZIONE MAPPA (Solo mappa dal vivo, pulita)
@@ -338,6 +495,48 @@
           <span>Premi <kbd>Esc</kbd> per chiudere</span>
         </div>
         <button id="btn-pres-close-footer" class="btn btn-secondary btn-sm">Chiudi</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       POP-UP MODALE STORICO E LIBRERIA MAPPE
+       ══════════════════════════════════════════════════════════════ -->
+  <div class="modal-backdrop" id="modal-map-library" style="display: none;">
+    <div class="modal-card modal-card-library" id="library-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span style="font-size: 1.3rem;">📚</span>
+          <div>
+            <h3>Storico Mappe</h3>
+            <span class="modal-subtext">Contenitore e archivio delle tue mappe RPG</span>
+          </div>
+        </div>
+        <div class="modal-header-actions">
+          <button id="btn-library-new-map" class="btn btn-primary btn-xs" title="Crea nuova mappa vuota">➕ Nuova Mappa</button>
+          <button id="btn-library-save-current" class="btn btn-secondary btn-xs" title="Salva la mappa attiva nello storico">💾 Salva Corrente</button>
+          <button id="btn-library-import-json" class="btn btn-secondary btn-xs" title="Carica file .json da computer">📥 Importa File</button>
+          <input type="file" id="input-import-map-file" accept=".json" style="display: none;" />
+          <button class="btn-modal-close" id="btn-close-library" title="Chiudi (Esc)">&times;</button>
+        </div>
+      </div>
+
+      <div class="modal-body modal-body-library">
+        <!-- Search and count bar -->
+        <div class="library-toolbar">
+          <input type="text" id="library-search-input" placeholder="🔍 Cerca per nome..." />
+          <span id="library-count-text" class="library-count">0 mappe salvate</span>
+        </div>
+
+        <!-- Grid of saved map cards -->
+        <div class="library-grid" id="library-grid">
+          <!-- Populated dynamically via JS -->
+        </div>
+      </div>
+
+      <div class="modal-footer modal-footer-library">
+        <span class="library-hint">Le mappe sono conservate in modo persistente. Puoi esportarle come backup in qualsiasi momento.</span>
+        <button id="btn-close-library-footer" class="btn btn-secondary btn-sm">Chiudi</button>
       </div>
     </div>
   </div>

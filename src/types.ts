@@ -121,8 +121,33 @@ export type FoliageType =
 
 export type { FoliageInstance, FoliageLayerJSON } from './foliage/FoliageModel';
 
-export type ToolType = 'pan' | 'terrain' | 'liquid' | 'foliage' | 'prop' | 'wall' | 'door' | 'light' | 'erase' | 'fog';
+export type ToolType = 'pan' | 'terrain' | 'liquid' | 'foliage' | 'prop' | 'wall' | 'door' | 'light' | 'erase' | 'fog' | 'draw' | 'interact';
 export type BrushMode = 'single' | 'rect' | 'fill' | 'brush';
+
+// --- Drawing Overlay System ---
+export type DrawingShapeType = 'freehand' | 'line' | 'rect' | 'circle' | 'triangle' | 'rectangle';
+export type DrawingSnapMode = 'tile_center' | 'tile_corner' | 'free';
+
+export interface DrawingPoint {
+  x: number; // world coordinates
+  y: number;
+}
+
+export interface DrawingStroke {
+  id: string;
+  shape: DrawingShapeType;
+  points: DrawingPoint[];  // for freehand: array of points; for shapes: [start, end]
+  color: string;
+  lineWidth: number;       // in world pixels (px / pixelsPerGrid * tileSize)
+  opacity: number;         // 0.0 to 1.0
+  filled: boolean;         // fill for closed shapes
+  fillColor: string;
+  persistent: boolean;     // false = scompare al rilascio del mouse
+}
+
+export interface DrawingLayer {
+  strokes: DrawingStroke[];
+}
 
 export interface Camera {
   x: number;       // camera center/offset in world px

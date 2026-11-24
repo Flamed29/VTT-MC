@@ -4,6 +4,7 @@ import { LiquidRenderer } from './LiquidRenderer';
 import { FoliageRenderer } from './FoliageRenderer';
 import { Canvas2DFoliageRenderer } from '../foliage/Canvas2DFoliageRenderer';
 import { AssetManager } from '../core/AssetManager';
+import { DrawingManager } from '../drawing/DrawingManager';
 import {
   Camera,
   TileType,
@@ -44,6 +45,8 @@ export interface RenderOptions {
   showFog?: boolean;
   isPlayerView?: boolean;
   fogMode?: 'hide' | 'reveal';
+  // Drawing overlay
+  drawingManager?: DrawingManager;
 }
 
 export class ViewportRenderer {
@@ -217,12 +220,17 @@ export class ViewportRenderer {
       this.renderFogOfWar(ctx, tileMap, startCol, endCol, startRow, endRow, tileSize, !!options.isPlayerView);
     }
 
-    // 7. LAYER: GRID OVERLAY
+    // 7. LAYER: DRAWING OVERLAY (sopra nebbia, sotto griglia e hover)
+    if (options.drawingManager) {
+      options.drawingManager.render(ctx);
+    }
+
+    // 8. LAYER: GRID OVERLAY
     if (options.showGrid) {
       this.renderGrid(ctx, tileMap, tileSize, startCol, endCol, startRow, endRow, options.gridThickness ?? 1);
     }
 
-    // 8. LAYER: SELECTION & HOVER OVERLAY
+    // 9. LAYER: SELECTION & HOVER OVERLAY
     this.renderHoverAndSelection(ctx, tileMap, options, tileSize);
 
     ctx.restore();
@@ -293,6 +301,12 @@ export class ViewportRenderer {
   }
 
   // --- Walls Layer ---
+  // Fix: Every shared edge between two tiles is stored in BOTH tiles' masks (N of [x,y] == S of [x,y-1]).
+  // Drawing both would render the wall twice and misaligned.
+  // Solution: Use a Set of canonical segment keys; each wall segment is identified by its
+  // "world-grid edge" coordinate (the top-left corner of the edge + orientation).
+  // A horizontal edge at the top of tile (x,y) → key "H:x,y"
+  // A vertical edge at the left of tile (x,y)  → key "V:x,y"
   private renderWalls(
     ctx: CanvasRenderingContext2D,
     tileMap: TileMap,
@@ -303,6 +317,7 @@ export class ViewportRenderer {
     s: number
   ): void {
     const wallThick = Math.max(4, s * 0.12);
+    const drawn = new Set<string>();
 
     for (let y = startRow; y < endRow; y++) {
       for (let x = startCol; x < endCol; x++) {
@@ -311,60 +326,85 @@ export class ViewportRenderer {
 
         const dx = x * s;
         const dy = y * s;
-
-        // Get the wall style stored for this specific cell
         const wallId = tileMap.getWallId(x, y);
 
         if (mask & WALL_BLOCK) {
-          const rBlock = this.atlas.getWallRegion(`block_${wallId}`) || this.atlas.getWallRegion('block');
-          if (rBlock) {
-            ctx.drawImage(
-              this.atlas.canvas,
-              rBlock.x, rBlock.y, rBlock.width, rBlock.height,
-              dx, dy, s, s
-            );
+          const blockKey = `BL:${x},${y}`;
+          if (!drawn.has(blockKey)) {
+            drawn.add(blockKey);
+            const rBlock = this.atlas.getWallRegion(`block_${wallId}`) || this.atlas.getWallRegion('block');
+            if (rBlock) {
+              ctx.drawImage(
+                this.atlas.canvas,
+                rBlock.x, rBlock.y, rBlock.width, rBlock.height,
+                dx, dy, s, s
+              );
+            }
           }
           continue;
         }
 
-        // Edge walls — draw each edge using the per-cell atlas texture
         const rH = this.atlas.getWallRegion(`edge_h_${wallId}`) || this.atlas.getWallRegion('edge_h');
         const rV = this.atlas.getWallRegion(`edge_v_${wallId}`) || this.atlas.getWallRegion('edge_v');
 
+        // NORTH edge of (x,y) == top edge → canonical key "H:x,y" (row y, col x)
         if (mask & WALL_NORTH) {
-          if (rH) {
-            ctx.drawImage(
-              this.atlas.canvas,
-              rH.x, rH.y, rH.width, rH.height,
-              dx, dy - wallThick * 0.5, s, wallThick
-            );
+          const key = `H:${x},${y}`;
+          if (!drawn.has(key)) {
+            drawn.add(key);
+            if (rH) {
+              ctx.drawImage(
+                this.atlas.canvas,
+                rH.x, rH.y, rH.width, rH.height,
+                dx, dy - wallThick * 0.5, s, wallThick
+              );
+            }
           }
         }
+
+        // SOUTH edge of (x,y) == top edge of (x,y+1) → canonical key "H:x,y+1"
         if (mask & WALL_SOUTH) {
-          if (rH) {
-            ctx.drawImage(
-              this.atlas.canvas,
-              rH.x, rH.y, rH.width, rH.height,
-              dx, dy + s - wallThick * 0.5, s, wallThick
-            );
+          const key = `H:${x},${y + 1}`;
+          if (!drawn.has(key)) {
+            drawn.add(key);
+            // Use wallId of this cell but draw at the border y+1
+            if (rH) {
+              ctx.drawImage(
+                this.atlas.canvas,
+                rH.x, rH.y, rH.width, rH.height,
+                dx, dy + s - wallThick * 0.5, s, wallThick
+              );
+            }
           }
         }
+
+        // WEST edge of (x,y) == left edge → canonical key "V:x,y"
         if (mask & WALL_WEST) {
-          if (rV) {
-            ctx.drawImage(
-              this.atlas.canvas,
-              rV.x, rV.y, rV.width, rV.height,
-              dx - wallThick * 0.5, dy, wallThick, s
-            );
+          const key = `V:${x},${y}`;
+          if (!drawn.has(key)) {
+            drawn.add(key);
+            if (rV) {
+              ctx.drawImage(
+                this.atlas.canvas,
+                rV.x, rV.y, rV.width, rV.height,
+                dx - wallThick * 0.5, dy, wallThick, s
+              );
+            }
           }
         }
+
+        // EAST edge of (x,y) == left edge of (x+1,y) → canonical key "V:x+1,y"
         if (mask & WALL_EAST) {
-          if (rV) {
-            ctx.drawImage(
-              this.atlas.canvas,
-              rV.x, rV.y, rV.width, rV.height,
-              dx + s - wallThick * 0.5, dy, wallThick, s
-            );
+          const key = `V:${x + 1},${y}`;
+          if (!drawn.has(key)) {
+            drawn.add(key);
+            if (rV) {
+              ctx.drawImage(
+                this.atlas.canvas,
+                rV.x, rV.y, rV.width, rV.height,
+                dx + s - wallThick * 0.5, dy, wallThick, s
+              );
+            }
           }
         }
       }
@@ -372,49 +412,108 @@ export class ViewportRenderer {
   }
 
   // --- Doors Layer ---
+  // Doors are rendered centered on their tile edge.
+  // Closed: texture spanning the edge opening.
+  // Open: the door panel "slides" into the wall (recessed into the adjacent tile),
+  //       leaving the opening clear with a subtle green tint.
   private renderDoors(ctx: CanvasRenderingContext2D, tileMap: TileMap, s: number): void {
+    const doorThick = Math.max(5, s * 0.14);     // door panel thickness (depth into wall)
+    const doorWidth = s * 0.82;                   // door width (slightly inset from tile edges)
+
     for (const door of tileMap.doors.values()) {
       const dx = door.x * s;
       const dy = door.y * s;
+
+      // Centre of the edge where the door sits
+      let edgeCX = dx + s * 0.5;
+      let edgeCY = dy + s * 0.5;
+      if (door.edge === 'N') edgeCY = dy;
+      if (door.edge === 'S') edgeCY = dy + s;
+      if (door.edge === 'W') edgeCX = dx;
+      if (door.edge === 'E') edgeCX = dx + s;
+
+      // isHorizontal: door panel lies horizontally (edge N or S)
       const isHorizontal = door.edge === 'N' || door.edge === 'S';
 
-      let cx = dx + s * 0.5;
-      let cy = dy + s * 0.5;
-
-      if (door.edge === 'N') cy = dy;
-      if (door.edge === 'S') cy = dy + s;
-      if (door.edge === 'W') cx = dx;
-      if (door.edge === 'E') cx = dx + s;
-
       ctx.save();
-      ctx.translate(cx, cy);
+      ctx.translate(edgeCX, edgeCY);
+      // Rotate so we can always draw in "horizontal door" coordinates:
+      //   X axis = along the door panel, Y axis = perpendicular (into the wall)
       if (!isHorizontal) ctx.rotate(Math.PI * 0.5);
 
       if (door.state === DoorState.OPEN) {
-        // Open door: green translucent arc showing door swing
-        ctx.fillStyle = 'rgba(16, 185, 129, 0.35)';
-        ctx.strokeStyle = '#10b981';
-        ctx.lineWidth = 2;
-        ctx.rotate(-Math.PI * 0.25);
-        ctx.fillRect(-s * 0.4, -6, s * 0.4, 12);
-        ctx.strokeRect(-s * 0.4, -6, s * 0.4, 12);
-      } else {
-        // Closed door: draw from atlas texture
+        // OPEN: door panel slides sideways into the wall (to the +X side of the opening).
+        // The panel is fully retracted alongside the wall, leaving the gap open.
+        const slideOffset = doorWidth * 0.5 + doorThick * 0.5; // panel moves to the right edge
+
+        // 1. Draw the opening gap tint (so players can see it's passable)
+        ctx.fillStyle = 'rgba(16, 185, 129, 0.12)';
+        ctx.fillRect(-doorWidth * 0.5, -doorThick * 0.5, doorWidth, doorThick);
+
+        // 2. Draw the door panel recessed at the right side
         const atlasRegion = this.atlas.getDoorRegion(door.type);
+        ctx.save();
+        ctx.translate(slideOffset, 0);
         if (atlasRegion) {
-          // Draw the pre-rendered door texture centered on the edge
+          // Map the atlas texture onto the small panel strip
+          const panelW = doorThick;
+          const panelH = doorWidth;
+          ctx.save();
+          ctx.rotate(Math.PI * 0.5);
           ctx.drawImage(
             this.atlas.canvas,
             atlasRegion.x, atlasRegion.y, atlasRegion.width, atlasRegion.height,
-            -s * 0.5, -s * 0.5, s, s
+            -panelH * 0.5, -panelW * 0.5, panelH, panelW
+          );
+          ctx.restore();
+        } else {
+          ctx.fillStyle = '#78350f';
+          ctx.strokeStyle = '#44200a';
+          ctx.lineWidth = 1;
+          ctx.fillRect(-doorThick * 0.5, -doorWidth * 0.5, doorThick, doorWidth);
+          ctx.strokeRect(-doorThick * 0.5, -doorWidth * 0.5, doorThick, doorWidth);
+        }
+        // Green edge indicator that door is open
+        ctx.strokeStyle = '#10b981';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-doorThick * 0.5 - 1, -doorWidth * 0.5 - 1, doorThick + 2, doorWidth + 2);
+        ctx.restore();
+
+      } else {
+        // CLOSED: draw the door panel spanning the full opening centered on the edge
+        const atlasRegion = this.atlas.getDoorRegion(door.type);
+        if (atlasRegion) {
+          ctx.drawImage(
+            this.atlas.canvas,
+            atlasRegion.x, atlasRegion.y, atlasRegion.width, atlasRegion.height,
+            -doorWidth * 0.5, -doorThick * 0.5,
+            doorWidth, doorThick
           );
         } else {
-          // Fallback
-          ctx.fillStyle = '#b45309';
-          ctx.fillRect(-s * 0.4, -6, s * 0.8, 12);
+          // Fallback: simple coloured rectangle
+          const fillColors: Record<number, string> = {
+            1: '#b45309', 2: '#92400e', 3: '#6b7280',
+            4: '#374151', 5: '#7c3aed'
+          };
+          ctx.fillStyle = fillColors[door.type] ?? '#b45309';
+          ctx.fillRect(-doorWidth * 0.5, -doorThick * 0.5, doorWidth, doorThick);
           ctx.strokeStyle = '#1e293b';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(-s * 0.4, -6, s * 0.8, 12);
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(-doorWidth * 0.5, -doorThick * 0.5, doorWidth, doorThick);
+
+          // Door knob / handle dot
+          ctx.fillStyle = '#fbbf24';
+          ctx.beginPath();
+          ctx.arc(doorWidth * 0.1, 0, doorThick * 0.25, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Locked indicator
+        if (door.state === DoorState.LOCKED) {
+          ctx.fillStyle = '#ef4444';
+          ctx.beginPath();
+          ctx.arc(0, 0, doorThick * 0.3, 0, Math.PI * 2);
+          ctx.fill();
         }
       }
 
@@ -737,6 +836,74 @@ export class ViewportRenderer {
       ctx.lineWidth = 2;
       ctx.fillRect(rx, ry, rw, rh);
       ctx.strokeRect(rx, ry, rw, rh);
+      return;
+    }
+
+    // Interact tool: highlight nearby doors in green
+    if (options.activeTool === 'interact' && options.hoverTile && options.hoverWorld) {
+      const hx = options.hoverTile.x * s;
+      const hy = options.hoverTile.y * s;
+
+      // Soft tile highlight
+      ctx.fillStyle = 'rgba(16, 185, 129, 0.10)';
+      ctx.strokeStyle = 'rgba(16, 185, 129, 0.5)';
+      ctx.lineWidth = 1.5;
+      ctx.fillRect(hx, hy, s, s);
+      ctx.strokeRect(hx, hy, s, s);
+
+      // Find nearest door on this tile or neighbors, highlight its edge
+      const checkTiles = [
+        [options.hoverTile.x, options.hoverTile.y],
+        [options.hoverTile.x, options.hoverTile.y - 1],
+        [options.hoverTile.x, options.hoverTile.y + 1],
+        [options.hoverTile.x - 1, options.hoverTile.y],
+        [options.hoverTile.x + 1, options.hoverTile.y]
+      ] as [number, number][];
+
+      let closestDoor: { door: import('../types').DoorData; dist: number } | null = null;
+
+      for (const [tx, ty] of checkTiles) {
+        for (const edge of ['N', 'E', 'S', 'W'] as const) {
+          const key = `${tx},${ty},${edge}`;
+          const door = tileMap.doors.get(key);
+          if (!door) continue;
+          const ex = (tx + (edge === 'E' ? 1 : edge === 'W' ? 0 : 0.5)) * s;
+          const ey = (ty + (edge === 'S' ? 1 : edge === 'N' ? 0 : 0.5)) * s;
+          const dist = Math.hypot(options.hoverWorld.x - ex, options.hoverWorld.y - ey);
+          if (!closestDoor || dist < closestDoor.dist) {
+            closestDoor = { door, dist };
+          }
+        }
+      }
+
+      if (closestDoor && closestDoor.dist < s * 0.65) {
+        const d = closestDoor.door;
+        const ex = (d.x + (d.edge === 'E' ? 1 : d.edge === 'W' ? 0 : 0.5)) * s;
+        const ey = (d.y + (d.edge === 'S' ? 1 : d.edge === 'N' ? 0 : 0.5)) * s;
+        const isHoriz = d.edge === 'N' || d.edge === 'S';
+        const hw = isHoriz ? s * 0.5 : s * 0.1;
+        const hh = isHoriz ? s * 0.1 : s * 0.5;
+
+        const isOpen = d.state === DoorState.OPEN;
+        ctx.fillStyle = isOpen
+          ? 'rgba(239, 68, 68, 0.3)'   // red hint = can close
+          : 'rgba(16, 185, 129, 0.3)'; // green hint = can open
+        ctx.strokeStyle = isOpen ? '#ef4444' : '#10b981';
+        ctx.lineWidth = 2.5;
+        ctx.fillRect(ex - hw, ey - hh, hw * 2, hh * 2);
+        ctx.strokeRect(ex - hw, ey - hh, hw * 2, hh * 2);
+
+        // Icon label
+        const label = isOpen ? '🔒 Chiudi' : '🔓 Apri';
+        ctx.font = `${Math.max(10, s * 0.14)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillStyle = '#ffffff';
+        ctx.shadowColor = 'rgba(0,0,0,0.8)';
+        ctx.shadowBlur = 4;
+        ctx.fillText(label, ex, ey - hh - 4);
+        ctx.shadowBlur = 0;
+      }
       return;
     }
 

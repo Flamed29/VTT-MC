@@ -1243,3 +1243,225 @@ body.dark-theme {
   padding: 0.55rem;
   font-size: 0.8rem;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   FINESTRA FLOTTANTE STRUMENTI DI DISEGNO
+   ═══════════════════════════════════════════════════════════════ */
+.drawing-tools-window {
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+  font-size: 0.78rem;
+  color: var(--text-main);
+  user-select: none;
+  overflow: hidden;
+}
+
+.drawing-tools-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-input);
+  border-bottom: 1px solid var(--border);
+  cursor: move;
+}
+
+.drawing-tools-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--primary);
+  letter-spacing: 0.02em;
+}
+
+.drawing-tools-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.drawing-tools-body {
+  padding: 0.65rem 0.75rem;
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
+}
+
+.drawing-section-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  margin-bottom: 0.4rem;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Shape selector grid */
+.drawing-shapes-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.3rem;
+}
+
+.drawing-shape-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.4rem 0.2rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1.1;
+}
+
+.drawing-shape-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.drawing-shape-btn.active {
+  border-color: var(--primary);
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.shape-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+/* Controls */
+.drawing-controls-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.drawing-ctrl-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.drawing-ctrl-row label {
+  color: var(--text-muted);
+  min-width: 70px;
+  font-size: 0.75rem;
+}
+
+.drawing-ctrl-row input[type="color"] {
+  width: 32px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  cursor: pointer;
+}
+
+.drawing-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1;
+}
+
+.drawing-slider-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.drawing-slider-row strong {
+  color: var(--primary);
+  font-size: 0.72rem;
+  min-width: 36px;
+  text-align: right;
+}
+
+/* Snap buttons */
+.drawing-snap-btns,
+.drawing-persist-btns {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.drawing-snap-btn,
+.drawing-persist-btn {
+  flex: 1;
+  padding: 0.3rem 0.4rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.drawing-snap-btn:hover,
+.drawing-persist-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.drawing-snap-btn.active,
+.drawing-persist-btn.active {
+  border-color: var(--primary);
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* Quick color palette */
+.drawing-quick-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.drawing-quick-color {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.1s ease, border-color 0.1s ease;
+}
+
+.drawing-quick-color:hover {
+  transform: scale(1.2);
+  border-color: #ffffff;
+}
+
+.drawing-quick-color.active {
+  border-color: var(--primary);
+  transform: scale(1.1);
+}
+
+/* Eraser panel: drawing filter row */
+.eraser-drawing-row {
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border);
+}

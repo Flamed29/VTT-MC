@@ -24,6 +24,7 @@ import {
 import { FoliageBrush } from './foliage/FoliageBrush';
 import { FOLIAGE_VARIANTS, FoliageModel } from './foliage/FoliageModel';
 import { MapStorage } from './core/MapStorage';
+import { DrawingManager } from './drawing/DrawingManager';
 
 class EditorApp {
   public tileMap: TileMap;
@@ -84,8 +85,12 @@ class EditorApp {
     liquid: true,
     walls: true,
     doors: true,
-    terrain: false // don't wipe floor by default
+    terrain: false, // don't wipe floor by default
+    drawing: true   // disegni overlay
   };
+
+  // Drawing Overlay System
+  public drawingManager: DrawingManager = new DrawingManager();
 
   // Interaction State
   private isMouseDown = false;
@@ -134,6 +139,7 @@ class EditorApp {
     this.initModalEvents();
     this.initPresentationEvents();
     this.initMapLibraryEvents();
+    this.initDrawingToolsWindow();
     this.updatePaletteUI();
     this.updateStatusTelemetry();
 
@@ -182,7 +188,9 @@ class EditorApp {
           // Fog of War options
           showFog: this.showFog,
           isPlayerView: false,
-          fogMode: this.fogMode
+          fogMode: this.fogMode,
+          // Drawing overlay
+          drawingManager: this.drawingManager
         },
         timestamp
       );
@@ -198,7 +206,8 @@ class EditorApp {
             showLighting: this.showLighting,
             showFog: true,
             isPlayerView: true,
-            activeTool: 'none'
+            activeTool: 'none',
+            drawingManager: this.drawingManager
           },
           timestamp
         );
@@ -215,7 +224,8 @@ class EditorApp {
             showLighting: this.showLighting,
             showFog: true,
             isPlayerView: true,
-            activeTool: 'none'
+            activeTool: 'none',
+            drawingManager: this.drawingManager
           },
           timestamp
         );
@@ -333,6 +343,7 @@ class EditorApp {
     bindFilter('pop-ef-walls', 'walls');
     bindFilter('pop-ef-doors', 'doors');
     bindFilter('pop-ef-terrain', 'terrain');
+    bindFilter('pop-ef-drawing', 'drawing');
 
     // Palette Search Bar
     const searchInput = document.getElementById('palette-search') as HTMLInputElement;
@@ -461,6 +472,31 @@ class EditorApp {
       return;
     }
 
+    if (this.activeTool === 'draw') {
+      titleEl.textContent = 'Disegno Overlay';
+      subEl.textContent = 'Annotazioni di sessione';
+      this.renderDrawingPaletteInfo(bodyEl);
+      return;
+    }
+
+    if (this.activeTool === 'interact') {
+      titleEl.textContent = 'Strumento Interazione';
+      subEl.textContent = 'Apri / Chiudi porte durante la sessione';
+      bodyEl.innerHTML = `
+        <div style="font-size: 0.8rem; line-height: 1.6; color: var(--text-muted);">
+          <p style="color: var(--primary); font-weight: 600; margin-bottom: 0.5rem;">👆 Modalità Interazione</p>
+          <p>• <strong>Clicca su una porta</strong> per aprirla o chiuderla istantaneamente.</p>
+          <p style="margin-top:0.3rem;">• La porta <strong>scorre lateralmente</strong> lungo il muro quando aperta.</p>
+          <p style="margin-top:0.3rem;">• Funziona anche nella <strong>finestra di Presentazione</strong> (non ancora).</p>
+          <p style="margin-top:0.5rem; color: var(--accent-cyan);">💡 Usa lo strumento <strong>Porta</strong> per piazzare nuove porte, e <strong>Interazione</strong> per gestirle durante il gioco.</p>
+        </div>
+        <div style="margin-top: 1rem; padding: 0.75rem; background: var(--bg-input); border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 0.75rem; color: var(--text-muted);">
+          <div id="interact-door-status">Nessuna porta selezionata</div>
+        </div>
+      `;
+      return;
+    }
+
     if (this.activeTool === 'erase') {
       titleEl.textContent = 'Proprietà Gomma';
       subEl.textContent = 'Filtra gli elementi da cancellare';
@@ -478,6 +514,7 @@ class EditorApp {
           <label class="checkbox-label"><input type="checkbox" id="ef-panel-walls" ${this.eraseFilters.walls ? 'checked' : ''} /> <strong>🛡️ Muri (Ostacoli LoS)</strong></label>
           <label class="checkbox-label"><input type="checkbox" id="ef-panel-doors" ${this.eraseFilters.doors ? 'checked' : ''} /> <strong>🚪 Porte & Varchi</strong></label>
           <label class="checkbox-label"><input type="checkbox" id="ef-panel-terrain" ${this.eraseFilters.terrain ? 'checked' : ''} /> <strong>🧱 Terreno (Pavimentazione)</strong></label>
+          <label class="checkbox-label"><input type="checkbox" id="ef-panel-drawing" ${this.eraseFilters.drawing ? 'checked' : ''} /> <strong>✏️ Disegni / Annotazioni</strong></label>
         </div>
 
         <div style="display: flex; gap: 0.4rem; margin-top: 0.4rem;">
@@ -507,6 +544,7 @@ class EditorApp {
       bindPanelCheck('ef-panel-walls', 'pop-ef-walls', 'walls');
       bindPanelCheck('ef-panel-doors', 'pop-ef-doors', 'doors');
       bindPanelCheck('ef-panel-terrain', 'pop-ef-terrain', 'terrain');
+      bindPanelCheck('ef-panel-drawing', 'pop-ef-drawing', 'drawing');
 
       bodyEl.querySelector('#btn-ef-all')?.addEventListener('click', () => {
         Object.keys(this.eraseFilters).forEach(k => (this.eraseFilters as any)[k] = true);
@@ -708,6 +746,7 @@ class EditorApp {
     set('pop-ef-walls', this.eraseFilters.walls);
     set('pop-ef-doors', this.eraseFilters.doors);
     set('pop-ef-terrain', this.eraseFilters.terrain);
+    set('pop-ef-drawing', this.eraseFilters.drawing);
   }
 
   private renderPropSizeControls(container: HTMLElement): void {
@@ -1218,6 +1257,216 @@ class EditorApp {
       this.brushRadius = parseInt(radiusSlider.value, 10);
       radiusVal.textContent = `${this.brushRadius} celle`;
     });
+  }
+
+  // --- Drawing Palette Info Panel ---
+  private renderDrawingPaletteInfo(container: HTMLElement): void {
+    container.innerHTML = `
+      <div style="font-size: 0.8rem; line-height: 1.6; color: var(--text-muted);">
+        <p style="color: var(--primary); font-weight: 600; margin-bottom: 0.5rem;">✏️ Layer Annotazioni di Sessione</p>
+        <p>• <strong>Disegna</strong> sul canvas senza modificare tile o oggetti.</p>
+        <p style="margin-top:0.3rem;">• Usa la <strong>finestra flottante ⚙️</strong> per scegliere forma, colore, snap e persistenza.</p>
+        <p style="margin-top:0.3rem;">• Forme <strong>temporanee</strong>: scompaiono al rilascio del mouse.</p>
+        <p style="margin-top:0.3rem;">• Forme <strong>permanenti</strong>: rimangono finché non le cancelli con la Gomma.</p>
+        <p style="margin-top:0.5rem; color: var(--accent-cyan);">💡 Il layer di disegno è visibile anche nella finestra di Presentazione!</p>
+      </div>
+
+      <div style="margin-top: 1rem; display: flex; flex-direction: column; gap: 0.4rem;">
+        <button id="btn-drawing-palette-undo" class="btn btn-secondary btn-sm">↩ Annulla ultimo</button>
+        <button id="btn-drawing-palette-clear" class="btn btn-danger btn-sm">🗑️ Cancella tutti i disegni</button>
+        <button id="btn-drawing-palette-open-window" class="btn btn-primary btn-sm">⚙️ Apri Finestra Strumenti</button>
+      </div>
+    `;
+
+    container.querySelector('#btn-drawing-palette-undo')?.addEventListener('click', () => {
+      this.drawingManager.undo();
+    });
+
+    container.querySelector('#btn-drawing-palette-clear')?.addEventListener('click', () => {
+      if (confirm('Cancellare tutti i disegni dall\'overlay?')) {
+        this.drawingManager.clearAll();
+      }
+    });
+
+    container.querySelector('#btn-drawing-palette-open-window')?.addEventListener('click', () => {
+      const win = document.getElementById('drawing-tools-window');
+      if (win) {
+        win.style.display = win.style.display === 'none' ? 'flex' : 'none';
+      }
+    });
+  }
+
+  // --- Drawing Tools Floating Window ---
+  private initDrawingToolsWindow(): void {
+    const win = document.getElementById('drawing-tools-window') as HTMLElement;
+    const header = document.getElementById('drawing-tools-header') as HTMLElement;
+    const btnClose = document.getElementById('btn-drawing-tools-close');
+    const btnOpen = document.getElementById('btn-drawing-tools-window');
+
+    if (!win) return;
+
+    // Open/close toggle via gear button in toolbar
+    btnOpen?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      win.style.display = win.style.display === 'none' ? 'flex' : 'none';
+      win.style.flexDirection = 'column';
+      // Also switch to draw tool when opening
+      this.switchTool('draw');
+      this.activeTool = 'draw';
+      const toolBtns = document.querySelectorAll<HTMLButtonElement>('.tool-btn');
+      toolBtns.forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tool === 'draw');
+      });
+      this.updatePaletteUI();
+    });
+
+    btnClose?.addEventListener('click', () => {
+      win.style.display = 'none';
+    });
+
+    // --- Draggable window ---
+    let isDragging = false;
+    let dragOffsetX = 0;
+    let dragOffsetY = 0;
+
+    header.addEventListener('mousedown', (e) => {
+      if ((e.target as HTMLElement).closest('button')) return;
+      isDragging = true;
+      const rect = win.getBoundingClientRect();
+      dragOffsetX = e.clientX - rect.left;
+      dragOffsetY = e.clientY - rect.top;
+      win.style.position = 'fixed';
+      win.style.right = 'auto';
+      e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const newLeft = Math.max(0, Math.min(window.innerWidth - 240, e.clientX - dragOffsetX));
+      const newTop = Math.max(0, Math.min(window.innerHeight - 100, e.clientY - dragOffsetY));
+      win.style.left = `${newLeft}px`;
+      win.style.top = `${newTop}px`;
+    });
+
+    window.addEventListener('mouseup', () => {
+      isDragging = false;
+    });
+
+    // --- Undo / Redo / Clear ---
+    document.getElementById('btn-drawing-undo')?.addEventListener('click', () => {
+      this.drawingManager.undo();
+    });
+    document.getElementById('btn-drawing-redo')?.addEventListener('click', () => {
+      this.drawingManager.redo();
+    });
+    document.getElementById('btn-drawing-clear-all')?.addEventListener('click', () => {
+      if (confirm('Cancellare tutti i disegni dall\'overlay?')) {
+        this.drawingManager.clearAll();
+      }
+    });
+
+    // --- Shape selection ---
+    const shapeBtns = win.querySelectorAll<HTMLButtonElement>('.drawing-shape-btn');
+    shapeBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        shapeBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.drawingManager.settings.shape = btn.dataset.shape as any;
+      });
+    });
+
+    // --- Color picker ---
+    const colorPicker = document.getElementById('drawing-color') as HTMLInputElement;
+    colorPicker?.addEventListener('input', () => {
+      this.drawingManager.settings.color = colorPicker.value;
+      this.syncDrawingFillColorAlpha();
+    });
+
+    // --- Line width ---
+    const sliderWidth = document.getElementById('drawing-line-width') as HTMLInputElement;
+    const valWidth = document.getElementById('val-drawing-line-width');
+    sliderWidth?.addEventListener('input', () => {
+      this.drawingManager.settings.lineWidth = parseFloat(sliderWidth.value);
+      if (valWidth) valWidth.textContent = `${this.drawingManager.settings.lineWidth} px`;
+    });
+
+    // --- Opacity ---
+    const sliderOpacity = document.getElementById('drawing-opacity') as HTMLInputElement;
+    const valOpacity = document.getElementById('val-drawing-opacity');
+    sliderOpacity?.addEventListener('input', () => {
+      this.drawingManager.settings.opacity = parseFloat(sliderOpacity.value);
+      if (valOpacity) valOpacity.textContent = `${Math.round(this.drawingManager.settings.opacity * 100)}%`;
+    });
+
+    // --- Filled ---
+    const chkFilled = document.getElementById('drawing-filled') as HTMLInputElement;
+    const fillColorRow = document.getElementById('drawing-fill-color-row');
+    chkFilled?.addEventListener('change', () => {
+      this.drawingManager.settings.filled = chkFilled.checked;
+      if (fillColorRow) fillColorRow.style.display = chkFilled.checked ? 'flex' : 'none';
+      if (fillColorRow) fillColorRow.style.flexDirection = 'column';
+    });
+
+    // --- Fill color ---
+    const fillColorPicker = document.getElementById('drawing-fill-color') as HTMLInputElement;
+    fillColorPicker?.addEventListener('input', () => {
+      this.syncDrawingFillColorAlpha();
+    });
+
+    // --- Fill opacity ---
+    const sliderFillOpacity = document.getElementById('drawing-fill-opacity') as HTMLInputElement;
+    const valFillOpacity = document.getElementById('val-drawing-fill-opacity');
+    sliderFillOpacity?.addEventListener('input', () => {
+      this.syncDrawingFillColorAlpha();
+      if (valFillOpacity) valFillOpacity.textContent = `${Math.round(parseFloat(sliderFillOpacity.value) * 100)}%`;
+    });
+
+    // --- Snap mode ---
+    const snapBtns = win.querySelectorAll<HTMLButtonElement>('.drawing-snap-btn');
+    snapBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        snapBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.drawingManager.settings.snapMode = btn.dataset.snap as any;
+      });
+    });
+
+    // --- Persistence ---
+    const persistBtns = win.querySelectorAll<HTMLButtonElement>('.drawing-persist-btn');
+    persistBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        persistBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.drawingManager.settings.persistent = btn.dataset.persist === 'true';
+      });
+    });
+
+    // --- Quick color swatches ---
+    const quickColors = win.querySelectorAll<HTMLElement>('.drawing-quick-color');
+    quickColors.forEach(el => {
+      el.addEventListener('click', () => {
+        const color = el.dataset.color || '#ff4444';
+        this.drawingManager.settings.color = color;
+        if (colorPicker) colorPicker.value = color;
+        quickColors.forEach(q => q.classList.remove('active'));
+        el.classList.add('active');
+        this.syncDrawingFillColorAlpha();
+      });
+    });
+  }
+
+  private syncDrawingFillColorAlpha(): void {
+    const fillColorPicker = document.getElementById('drawing-fill-color') as HTMLInputElement;
+    const sliderFillOpacity = document.getElementById('drawing-fill-opacity') as HTMLInputElement;
+    if (!fillColorPicker || !sliderFillOpacity) return;
+
+    const hex = fillColorPicker.value;
+    const alpha = parseFloat(sliderFillOpacity.value);
+    // Convert hex + alpha to rgba
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    this.drawingManager.settings.fillColor = `rgba(${r},${g},${b},${alpha})`;
   }
 
   // --- Modal Events (Add Custom Asset) ---
@@ -1902,7 +2151,7 @@ class EditorApp {
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
 
-      if (e.button === 1 || e.button === 2 || this.activeTool === 'pan' || e.shiftKey) {
+      if (e.button === 1 || e.button === 2 || this.activeTool === 'pan' || (e.shiftKey && this.activeTool !== 'draw')) {
         this.isPanning = true;
         this.panStart = { x: mouseX - this.renderer.camera.x, y: mouseY - this.renderer.camera.y };
         canvas.style.cursor = 'grabbing';
@@ -1915,7 +2164,12 @@ class EditorApp {
         const tile = this.renderer.worldToTile(world.x, world.y, this.tileMap.pixelsPerGrid);
         this.dragStartTile = { ...tile };
 
-        if (this.activeTool === 'foliage' || this.brushMode === 'single') {
+        if (this.activeTool === 'draw') {
+          this.drawingManager.beginStroke(world.x, world.y, this.tileMap.pixelsPerGrid);
+        } else if (this.activeTool === 'interact') {
+          // Interact always uses single-click logic regardless of brushMode
+          this.applyToolAt(world.x, world.y, true);
+        } else if (this.activeTool === 'foliage' || this.brushMode === 'single') {
           this.applyToolAt(world.x, world.y, true);
         } else if (this.brushMode === 'fill') {
           this.applyFloodFillAt(tile.x, tile.y);
@@ -1949,7 +2203,9 @@ class EditorApp {
       const curTileEl = document.getElementById('stat-cursor-tile');
       if (curTileEl) curTileEl.textContent = `Cella: [${tile.x}, ${tile.y}]`;
 
-      if (this.isMouseDown && (this.activeTool === 'foliage' || this.brushMode === 'single')) {
+      if (this.isMouseDown && this.activeTool === 'draw') {
+        this.drawingManager.continueStroke(world.x, world.y, this.tileMap.pixelsPerGrid);
+      } else if (this.isMouseDown && (this.activeTool === 'foliage' || this.brushMode === 'single')) {
         this.applyToolAt(world.x, world.y, false);
       } else if (this.isMouseDown && this.brushMode === 'brush') {
         this.applyBrushAt(world.x, world.y);
@@ -1959,11 +2215,13 @@ class EditorApp {
     window.addEventListener('mouseup', () => {
       if (this.isPanning) {
         this.isPanning = false;
-        canvas.style.cursor = 'crosshair';
+        canvas.style.cursor = this.activeTool === 'draw' ? 'crosshair' : 'crosshair';
       }
 
       if (this.isMouseDown) {
-        if (this.brushMode === 'rect' && this.hoverTile) {
+        if (this.activeTool === 'draw') {
+          this.drawingManager.endStroke();
+        } else if (this.brushMode === 'rect' && this.hoverTile) {
           this.applyRectFill(this.dragStartTile, this.hoverTile);
         }
         this.isMouseDown = false;
@@ -2110,6 +2368,10 @@ class EditorApp {
 
       case 'erase':
         // Selective erasure controlled by eraseFilters:
+        if (this.eraseFilters.drawing) {
+          this.drawingManager.eraseAt(worldX, worldY, s * 1.2);
+        }
+
         if (this.eraseFilters.foliage) {
           this.tileMap.removeFoliageInRadius(worldX / s, worldY / s, 1.2);
         }
@@ -2142,7 +2404,69 @@ class EditorApp {
       case 'fog':
         this.tileMap.setFog(tile.x, tile.y, this.fogMode === 'hide');
         break;
+
+      case 'interact':
+        // Interact tool: click on or near a door to toggle open/closed.
+        // We check all 4 edges of the hovered tile plus neighbours within click radius.
+        if (isInitialClick) {
+          const toggled = this.tryToggleNearestDoor(worldX, worldY, s);
+          if (!toggled) {
+            // Also check adjacent tiles (the edge might be stored in the neighbour)
+            const neighbors: [number, number][] = [
+              [tile.x, tile.y - 1], [tile.x, tile.y + 1],
+              [tile.x - 1, tile.y], [tile.x + 1, tile.y]
+            ];
+            for (const [nx, ny] of neighbors) {
+              if (this.tryToggleNearestDoor(worldX, worldY, s, nx, ny)) break;
+            }
+          }
+        }
+        break;
     }
+  }
+
+  /**
+   * Finds the door closest to (worldX, worldY) on a given tile and toggles it.
+   * Returns true if a door was found and toggled.
+   */
+  private tryToggleNearestDoor(
+    worldX: number, worldY: number, s: number,
+    tileX?: number, tileY?: number
+  ): boolean {
+    const tx = tileX ?? Math.floor(worldX / s);
+    const ty = tileY ?? Math.floor(worldY / s);
+
+    const edges: Array<'N' | 'E' | 'S' | 'W'> = ['N', 'E', 'S', 'W'];
+    let bestDoor: import('./types').DoorData | null = null;
+    let bestDist = Infinity;
+
+    for (const edge of edges) {
+      const key = this.tileMap.getDoorKey(tx, ty, edge);
+      const door = this.tileMap.doors.get(key);
+      if (!door) continue;
+
+      // World position of the edge centre
+      const ex = (tx + (edge === 'E' ? 1 : edge === 'W' ? 0 : 0.5)) * s;
+      const ey = (ty + (edge === 'S' ? 1 : edge === 'N' ? 0 : 0.5)) * s;
+      const dist = Math.hypot(worldX - ex, worldY - ey);
+
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestDoor = door;
+      }
+    }
+
+    // Only toggle if click is within ~0.65 tiles of the edge
+    if (bestDoor && bestDist < s * 0.65) {
+      this.tileMap.saveState();
+      if (bestDoor.state === DoorState.OPEN) {
+        bestDoor.state = DoorState.CLOSED;
+      } else {
+        bestDoor.state = DoorState.OPEN;
+      }
+      return true;
+    }
+    return false;
   }
 
   /**

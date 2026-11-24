@@ -1,0 +1,6 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "commit_message": {
+    "prompt": "REGOLE DI EFFICIENZA TOKEN (OBBLIGATORIE):\n1. Rispondi nella lingua dell'utente in modo telegrafico: zero preamboli, zero convenevoli, zero riepiloghi finali.\n2. Non ripetere o spiegare il codice appena scritto a meno che non sia esplicitamente richiesto.\n3. Modifica solo le righe strettamente necessarie: usa sempre strumenti di modifica mirata (diff/patch) invece di riscrivere interi file.\n4. Leggi solo i file esplicitamente menzionati con @ o strettamente indispensabili; non esplorare l'intera cartella se non richiesto.\n5. Mantieni i commenti nel codice al minimo indispensabile."
+  }
+}

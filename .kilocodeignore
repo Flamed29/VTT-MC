@@ -1,0 +1,38 @@
+# Dipendenze e cartelle di build
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+
+# File di lock e log
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+*.log
+
+# Asset pesanti, immagini, audio e mappe VTT
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.svg
+*.ico
+*.mp3
+*.wav
+*.ogg
+*.mp4
+*.woff
+*.woff2
+*.ttf
+*.map
+*.min.js
+*.min.css
+
+# Cartelle di sistema e IDE
+.git/
+.vscode/
+.idea/
+.DS_Store
