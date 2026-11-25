@@ -22,10 +22,13 @@ gli event listener mouse già presenti nel codice originale.
 - Si aggancia al canvas esistente senza modificare ViewportRenderer o TileMap
 - È completamente disattivabile senza effetti sul resto dell'app
 
+### File esistenti modificati
+- `src/main.ts`: aggiunto import TouchHandler e istanziazione in fondo a initCanvasEvents()
+- `src/foliage/WebGLFoliageRenderer.ts`: aggiunto import android-config, maxInstances ora usa ANDROID_FOLIAGE_MAX_INSTANCES
+
 ### Cosa NON fa
-- Non modifica nessun file esistente in src/core/, src/rendering/, src/foliage/, src/data/, src/vtt/, src/drawing/
 - Non rimuove né altera gli event listener del mouse
-- Non cambia la logica di rendering
+- Non cambia la logica di rendering, brush, posizionamento foliage
 
 ---
 

@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { FoliageInstance, FoliageLayerJSON } from './FoliageModel';
 import { FOLIAGE_VERTEX_SHADER, FOLIAGE_FRAGMENT_SHADER } from './FoliageShader';
+import { ANDROID_FOLIAGE_MAX_INSTANCES } from '../android-config';
 
 export class WebGLFoliageRenderer {
   public canvas: HTMLCanvasElement;
@@ -17,7 +18,7 @@ export class WebGLFoliageRenderer {
   private material: THREE.ShaderMaterial | null = null;
   private atlasTexture: THREE.CanvasTexture | null = null;
 
-  private maxInstances = 65536; // Supporto fino a 65.536 ciuffi contemporanei
+  private maxInstances = ANDROID_FOLIAGE_MAX_INSTANCES; // Limite GPU per tablet Android (android-port)
   private dummyMatrix = new THREE.Matrix4();
   private dummyPosition = new THREE.Vector3();
   private dummyQuaternion = new THREE.Quaternion();

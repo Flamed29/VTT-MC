@@ -22,6 +22,7 @@ import {
 } from './types';
 
 import { FoliageBrush } from './foliage/FoliageBrush';
+import { TouchHandler } from './touch/TouchHandler';
 import { FOLIAGE_VARIANTS, FoliageModel } from './foliage/FoliageModel';
 import { MapStorage } from './core/MapStorage';
 import { DrawingManager } from './drawing/DrawingManager';
@@ -2246,6 +2247,23 @@ class EditorApp {
       const statZoom = document.getElementById('stat-zoom');
       if (statZoom) statZoom.textContent = `Zoom: ${Math.round(newZoom * 100)}%`;
     }, { passive: false });
+
+    // Touch support per tablet Android (android-port)
+    new TouchHandler(
+      canvas,
+      (delta, cx, cy) => {
+        const zoomFactor = 1 + delta * 0.01;
+        const oldZoom = this.renderer.camera.zoom;
+        const newZoom = Math.max(0.15, Math.min(4.0, oldZoom * zoomFactor));
+        this.renderer.camera.x = cx - (cx - this.renderer.camera.x) * (newZoom / oldZoom);
+        this.renderer.camera.y = cy - (cy - this.renderer.camera.y) * (newZoom / oldZoom);
+        this.renderer.camera.zoom = newZoom;
+      },
+      (dx, dy) => {
+        this.renderer.camera.x += dx;
+        this.renderer.camera.y += dy;
+      }
+    );
   }
 
   // --- Tool Application Logic ---
